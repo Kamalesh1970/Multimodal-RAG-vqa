@@ -6,7 +6,7 @@ A Multimodal Retrieval-Augmented Generation (RAG) system built with FastAPI and 
 - **Phase 1 — Project Foundation (Completed)**
 - **Phase 2 — Document Ingestion & OCR (Completed)**
 - **Phase 3 — Multimodal Embeddings & Vector Storage (Completed)**
-- **Phase 4 — Multimodal Retrieval (Not Started)**
+- **Phase 4 — Multimodal Retrieval (Completed)**
 
 ---
 
@@ -24,6 +24,13 @@ A Multimodal Retrieval-Augmented Generation (RAG) system built with FastAPI and 
 - **Vector Storage**: Maintains two independent indexes using `FAISS` (`IndexFlatIP` exact flat indexes wrapped with `IndexIDMap2` to map SQLite `pages.id` primary keys deterministically).
 - **Device Support**: Set via `EMBEDDING_DEVICE` (`auto` / `cpu` / `cuda`).
 - **Disk Persistence**: FAISS indexes are saved to `data/indexes/` and reloaded dynamically on restart.
+
+## Features (Phase 4 Multimodal Retrieval)
+- **Document-Isolated Retrieval**: Limits candidate queries to the specific document ID requested, preventing cross-tenant or cross-document data leakage.
+- **Calibrated Score Fusion**: Evaluates raw similarity scores on a min-max normalized scale within the document candidate set to handle model calibration differences, fusing modalities using configurable text/image weights.
+- **Weighted Available Modalities (WAM)**: Dynamically adjusts score weighting when a specific modality is missing (e.g. blank page with no OCR text) to avoid penalizing visual-only pages.
+- **Lexical Evidence Selection**: Normalizes query terms to identify and extract the top 3 most relevant localized text blocks from raw OCR structures.
+- **Deterministic Tie-Breaking**: Ranks candidates based on fused score descending, then page number ascending, and finally page ID ascending to guarantee stable result lists.
 
 ---
 
@@ -134,6 +141,38 @@ python -m uvicorn backend.main:app --reload
 * **GET** `/system/vector-status`
   * Exposes global status information about the text and image vector indexes.
 
+### 7. Multimodal Retrieval
+* **POST** `/retrieve`
+  * Submits query question text to get matching document page evidence (does not generate natural language text answers).
+  * Request Format:
+    ```json
+    {
+      "doc_id": "550e8400-e29b-41d4-a716-446655440000",
+      "question": "What is the total amount?",
+      "top_k": 3
+    }
+    ```
+  * Response Format:
+    ```json
+    {
+      "doc_id": "550e8400-e29b-41d4-a716-446655440000",
+      "question": "What is the total amount?",
+      "results": [
+        {
+          "page_id": 12,
+          "page_number": 2,
+          "scores": {
+            "text": 0.8245,
+            "image": 0.2201,
+            "fused": 0.6548
+          },
+          "matched_modalities": ["text", "image"],
+          "evidence_text": ["Total Amount", "1500 rupees"]
+        }
+      ]
+    }
+    ```
+
 ---
 
 ## Running Tests
@@ -158,6 +197,7 @@ Multimodal-RAG-vqa/
 │   ├── config.py
 │   ├── database.py
 │   ├── vector_store.py   # FAISS double-index vector store
+│   ├── retrieval.py      # Multimodal query retrieval, score fusion, & evidence extraction
 │   ├── embeddings/
 │   │   ├── __init__.py
 │   │   ├── text_embedder.py  # SentenceTransformers L2 normalized text embeddings
@@ -174,7 +214,8 @@ Multimodal-RAG-vqa/
 │   ├── __init__.py
 │   ├── test_health.py
 │   ├── test_ingestion.py # Ingestion flow and error handling E2E tests
-│   └── test_embeddings.py # Embedding unit, sanity, and persistence tests
+│   ├── test_embeddings.py # Embedding unit, sanity, and persistence tests
+│   └── test_retrieval.py # Query retrieval validation and performance metrics comparison
 ├── reports/
 │   └── PROJECT_PROGRESS.md
 ├── .env.example
@@ -190,7 +231,7 @@ Multimodal-RAG-vqa/
 - [x] **Phase 1 — Project Foundation**: Setup backend server, database, configuration, and logging.
 - [x] **Phase 2 — Ingestion & OCR**: PDF rendering, image orientation correction, PaddleOCR integration, metadata persistence, and upload endpoints.
 - [x] **Phase 3 — Embeddings & Vector Storage**: Page-level visual and text embedding generation using OpenCLIP/SentenceTransformers and FAISS indexing.
-- [ ] **Phase 4 — Retrieval**: FAISS vector search implementation (Not started - Retrieval is Phase 4 and is not yet implemented).
+- [x] **Phase 4 — Multimodal Retrieval**: Exact search, document-isolation filtering, min-max score calibration, and WAM score fusion.
 - [ ] **Phase 5 — Gemini VLM**: VLM inference logic using Gemini API.
 - [ ] **Phase 6 — Accuracy & Grounding**: Reranking and confidence estimation.
 - [ ] **Phase 7 — Custom Frontend**: React/Streamlit interface.

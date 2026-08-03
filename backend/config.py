@@ -28,6 +28,11 @@ class Settings:
     IMAGE_EMBEDDING_PRETRAINED: str = os.getenv("IMAGE_EMBEDDING_PRETRAINED", "laion2b_s34b_b79k")
     EMBEDDING_DEVICE: str = os.getenv("EMBEDDING_DEVICE", "auto")
     VECTOR_INDEX_DIR: Path = PROJECT_ROOT / Path(os.getenv("VECTOR_INDEX_DIR", "data/indexes"))
+    # Phase 4 Retrieval configurations
+    RETRIEVAL_TOP_K: int = int(os.getenv("RETRIEVAL_TOP_K", "3"))
+    TEXT_RETRIEVAL_WEIGHT: float = float(os.getenv("TEXT_RETRIEVAL_WEIGHT", "0.65"))
+    IMAGE_RETRIEVAL_WEIGHT: float = float(os.getenv("IMAGE_RETRIEVAL_WEIGHT", "0.35"))
+    RETRIEVAL_MIN_SCORE: float = float(os.getenv("RETRIEVAL_MIN_SCORE", "0.0"))
     
     # Gemini API Key placeholder for future phases
     GEMINI_API_KEY: str | None = os.getenv("GEMINI_API_KEY")
@@ -35,6 +40,13 @@ class Settings:
     # Ingestion settings
     MAX_UPLOAD_MB: int = int(os.getenv("MAX_UPLOAD_MB", "20"))
     
+    def __init__(self):
+        # Validate weights
+        if not (0.0 <= self.TEXT_RETRIEVAL_WEIGHT <= 1.0):
+            raise ValueError(f"TEXT_RETRIEVAL_WEIGHT must be between 0.0 and 1.0, got {self.TEXT_RETRIEVAL_WEIGHT}")
+        if not (0.0 <= self.IMAGE_RETRIEVAL_WEIGHT <= 1.0):
+            raise ValueError(f"IMAGE_RETRIEVAL_WEIGHT must be between 0.0 and 1.0, got {self.IMAGE_RETRIEVAL_WEIGHT}")
+            
     @property
     def MAX_UPLOAD_SIZE_BYTES(self) -> int:
         return self.MAX_UPLOAD_MB * 1024 * 1024

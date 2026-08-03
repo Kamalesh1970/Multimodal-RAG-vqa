@@ -234,3 +234,65 @@ class VectorStore:
             "image_dimension": cls._image_dim,
             "index_status": "healthy" if cls._text_index is not None and cls._image_index is not None else "uninitialized"
         }
+
+    @classmethod
+    def search_text_index(cls, vector: np.ndarray, k: int) -> list[tuple[int, float]]:
+        """
+        Searches the FAISS text index. Returns a list of (page_id, score) tuples.
+        """
+        if cls._text_index is None:
+            logger.warning("Text index is not initialized.")
+            return []
+        
+        ntotal = cls._text_index.ntotal
+        if ntotal == 0:
+            return []
+            
+        try:
+            v = cls.validate_vector(vector, cls._text_dim)
+        except Exception as e:
+            logger.error(f"Text vector validation failed during search: {e}")
+            raise
+            
+        search_k = min(k, ntotal)
+        if search_k <= 0:
+            return []
+            
+        scores, ids = cls._text_index.search(v, search_k)
+        
+        results = []
+        for score, pid in zip(scores[0], ids[0]):
+            if pid != -1:
+                results.append((int(pid), float(score)))
+        return results
+
+    @classmethod
+    def search_image_index(cls, vector: np.ndarray, k: int) -> list[tuple[int, float]]:
+        """
+        Searches the FAISS image index. Returns a list of (page_id, score) tuples.
+        """
+        if cls._image_index is None:
+            logger.warning("Image index is not initialized.")
+            return []
+            
+        ntotal = cls._image_index.ntotal
+        if ntotal == 0:
+            return []
+            
+        try:
+            v = cls.validate_vector(vector, cls._image_dim)
+        except Exception as e:
+            logger.error(f"Image vector validation failed during search: {e}")
+            raise
+            
+        search_k = min(k, ntotal)
+        if search_k <= 0:
+            return []
+            
+        scores, ids = cls._image_index.search(v, search_k)
+        
+        results = []
+        for score, pid in zip(scores[0], ids[0]):
+            if pid != -1:
+                results.append((int(pid), float(score)))
+        return results

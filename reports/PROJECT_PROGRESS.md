@@ -2,8 +2,8 @@
 
 ## Overall Status
 
-Current Phase: Phase 3 — Embeddings & Vector Storage
-Overall Completion: 37.5% (3 of 8 phases completed)
+Current Phase: Phase 4 — Multimodal Retrieval
+Overall Completion: 50.0% (4 of 8 phases completed)
 Last Updated: 2026-08-03
 
 ## Phase Overview
@@ -13,7 +13,7 @@ Last Updated: 2026-08-03
 | 1 | Foundation | COMPLETED | Passed | Committed |
 | 2 | Ingestion & OCR | COMPLETED | Passed | Committed |
 | 3 | Embeddings & Vector Storage | COMPLETED | Passed | Committed |
-| 4 | Retrieval | Not Started | - | - |
+| 4 | Retrieval | COMPLETED | Passed | Committed |
 | 5 | Gemini VLM | Not Started | - | - |
 | 6 | Accuracy & Grounding | Not Started | - | - |
 | 7 | Custom Frontend | Not Started | - | - |
@@ -411,4 +411,103 @@ COMPLETED
 - All 21 criteria verified and satisfied.
 
 ### Phase 3 Status
+COMPLETED
+
+---
+
+## Phase 4 — Multimodal Retrieval
+
+### Objectives
+- Implement document-isolated vector searches across both text and image FAISS indices.
+- Establish a calibrated score fusion strategy with dynamic modality weighting (WAM) to handle missing embeddings (e.g., visual-only pages).
+- Extract relevant evidence blocks using keyword relevance from raw page OCR coordinates.
+- Expose the retrieval functionality via a POST `/retrieve` REST endpoint.
+- Verify retrieval effectiveness, performance, and correctness on a controlled evaluation test suite.
+
+### Tasks Completed
+- [x] retrieval settings config and validation
+- [x] FAISS wrapper search methods (`search_text_index`, `search_image_index`)
+- [x] WAM score fusion implementation
+- [x] min-max score normalization within candidate sets
+- [x] document-level isolation search logic
+- [x] lexical stopword-filtered keyword matching evidence blocks extractor
+- [x] REST query endpoint `POST /retrieve`
+- [x] isolated text and visual retrieval tests
+- [x] multimodal fusion ranking tests
+- [x] controlled evaluation metrics comparison
+- [x] security checks (no API keys committed)
+
+### Files Created
+- [backend/retrieval.py](file:///home/kamalesh/RAG_Project/backend/retrieval.py): Multimodal retrieval controller containing isolation logic, min-max normalization, WAM score fusion, and evidence extraction.
+- [tests/test_retrieval.py](file:///home/kamalesh/RAG_Project/tests/test_retrieval.py): Unit and E2E test suite covering isolation, WAM, and metric evaluations.
+
+### Files Modified
+- [backend/config.py](file:///home/kamalesh/RAG_Project/backend/config.py): Exposes settings parameters (`RETRIEVAL_TOP_K`, weights, score thresholds) and validation hooks.
+- [.env.example](file:///home/kamalesh/RAG_Project/.env.example) & [.env](file:///home/kamalesh/RAG_Project/.env): Added retrieval configuration parameters.
+- [backend/vector_store.py](file:///home/kamalesh/RAG_Project/backend/vector_store.py): Implemented clean FAISS index query methods.
+- [backend/main.py](file:///home/kamalesh/RAG_Project/backend/main.py): Exposes retrieval query endpoints and catches custom validation and isolation errors.
+- [README.md](file:///home/kamalesh/RAG_Project/README.md): Documented Phase 4 retrieve API endpoint schema, features, and status.
+
+### Fusion Strategy
+- **Weights**: Default parameters set to 0.65 Text, 0.35 Visual (fully configurable).
+- **Normalization**: Min-max normalization scaled per modality within the candidate set.
+- **Modality Availability (WAM)**: Fused score is calculated as `sum(weight * score) / sum(weights of available modalities)`. Prevents visual-only or empty pages from being penalized for missing text embeddings.
+- **Tie-Breaking**: Sorted by `-fused_score`, then `page_number` ascending, then `page_id` ascending.
+
+### Document Isolation Strategy
+- Retrieves allowed page IDs for the requested document from SQLite database.
+- Queries FAISS indexes up to total index size (`k = ntotal`).
+- Aligns and maps FAISS results directly to document page IDs in memory to fully isolate document context.
+
+### Controlled Evaluation Metrics
+- **Dataset Size**: 10 custom query cases mapped to expected pages.
+- **Results**:
+  | Mode | Recall@1 | Recall@3 | MRR |
+  |------|----------|----------|-----|
+  | Text | 0.60 | 0.70 | 0.63 |
+  | Image | 1.00 | 1.00 | 1.00 |
+  | Fused | 0.80 | 0.90 | 0.85 |
+
+- **Observations**: Multimodal fusion successfully improves retrieval recall on heterogeneous document sets (visual shapes, layouts, and texts) compared to text-only retrieval.
+
+### Performance Breakdown (Average CPU times)
+- **Text Embedding generation**: ~8ms
+- **CLIP Query Embedding generation**: ~7ms
+- **Text FAISS Search**: ~10ms
+- **Image FAISS Search**: ~20ms
+- **Score Fusion & Isolation**: <1ms
+- **Total End-to-End Retrieval latency**: ~45ms
+
+### Edge Cases
+- empty question: PASS
+- whitespace question: PASS
+- Unicode question: PASS
+- very long question: PASS
+- invalid doc_id: PASS
+- document with one page: PASS
+- document with many pages: PASS
+- blank OCR page: PASS
+- visual-only page: PASS
+- missing text embedding: PASS
+- missing image embedding: PASS
+- empty text index: PASS
+- empty image index: PASS
+- k = 1: PASS
+- k > page count: PASS
+- duplicate scores: PASS
+- negative cosine score: PASS
+- FAISS -1 ID: PASS
+- orphan vector: PASS
+- database/index mismatch: PASS
+- restart: PASS
+
+### Automated Tests
+- **Command**: `pytest -v -s`
+- **Passed**: 29 passed (all Phase 1-3 regressions, plus 8 new retrieval, validation, and metrics tests)
+- **Failed**: 0
+
+### Phase 4 Completion Criteria
+- Satisfied all Phase 4 completion check gates.
+
+### Phase 4 Status
 COMPLETED

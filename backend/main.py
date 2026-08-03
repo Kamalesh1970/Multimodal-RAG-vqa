@@ -4,6 +4,7 @@ import json
 from contextlib import asynccontextmanager
 # pyrefly: ignore [missing-import]
 from fastapi import FastAPI, UploadFile, File, HTTPException
+from pydantic import BaseModel
 from backend.config import settings
 from backend.database import init_db, get_db_connection
 from backend.ingestion.processor import ingest_document, IngestionError
@@ -270,4 +271,38 @@ def get_system_vector_status():
     except Exception as e:
         logger.error(f"Failed to get vector store status: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to retrieve vector store status.")
+
+class RetrieveRequest(BaseModel):
+    doc_id: str
+    question: str
+    top_k: int | None = None
+
+@app.post("/retrieve")
+def retrieve_grounded_evidence(request: RetrieveRequest):
+    """
+    Multimodal retrieval endpoint. Returns an ordered list of page matches,
+    their scores, matched modalities, and lexical evidence blocks.
+    Does not run generative LLM responses.
+    """
+    from backend.retrieval import retrieve_evidence, DocumentNotFoundError, IncompleteDocumentError
+    try:
+        results = retrieve_evidence(
+            doc_id=request.doc_id,
+            question=request.question,
+            top_k=request.top_k
+        )
+        return {
+            "doc_id": request.doc_id,
+            "question": request.question,
+            "results": results
+        }
+    except DocumentNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except IncompleteDocumentError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error during retrieval execution: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error during retrieval.")
 
