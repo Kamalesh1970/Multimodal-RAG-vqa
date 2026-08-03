@@ -34,6 +34,8 @@ class TextEmbedder:
         Returns the embedding dimension of the text model.
         """
         model = cls.get_model()
+        if hasattr(model, "get_embedding_dimension"):
+            return model.get_embedding_dimension()
         return model.get_sentence_embedding_dimension()
 
     @classmethod

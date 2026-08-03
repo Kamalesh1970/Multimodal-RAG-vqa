@@ -37,6 +37,13 @@ class Settings:
     IMAGE_RETRIEVAL_WEIGHT: float = float(os.getenv("IMAGE_RETRIEVAL_WEIGHT", "0.35"))
     RETRIEVAL_MIN_SCORE: float = float(os.getenv("RETRIEVAL_MIN_SCORE", "0.0"))
     
+    # Phase 6 Optimization configurations
+    FUSION_METHOD: str = os.getenv("FUSION_METHOD", "normalized") # 'weighted', 'normalized', 'rrf'
+    QUERY_AWARE_FUSION: bool = os.getenv("QUERY_AWARE_FUSION", "false").lower() == "true"
+    RRF_CONSTANT: int = int(os.getenv("RRF_CONSTANT", "60"))
+    RERANKER_ENABLED: bool = os.getenv("RERANKER_ENABLED", "false").lower() == "true"
+    
+    
     # Phase 5 VLM Backend configuration
     VLM_PROVIDER: str = os.getenv("VLM_PROVIDER", "gemini") # 'gemini' or 'openai'
     

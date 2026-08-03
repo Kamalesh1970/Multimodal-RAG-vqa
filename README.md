@@ -232,6 +232,31 @@ pytest -m "not ocr"
 
 ---
 
+## Evaluation & Benchmarking (Phase 6)
+
+The RAG system contains offline evaluation and optimization scripts to run retrieval and VQA benchmarks:
+
+### 1. Run Retrieval Evaluation (Mode A)
+Executes offline retrieval recall and fusion experiments without requiring paid VLM API credentials:
+```bash
+python scripts/evaluate_retrieval.py
+```
+This script runs a grid search on text/image weights, min-max score normalization, and Reciprocal Rank Fusion (RRF), saving metrics to [reports/evaluation/retrieval_optimized.json](file:///home/kamalesh/RAG_Project/reports/evaluation/retrieval_optimized.json).
+
+### 2. Run VQA Generation Evaluation (Mode B & C)
+Executes the visual question answering pipeline, scoring exact-value accuracy, unanswerable queries, and prompt injection resistance:
+```bash
+# Mode B: Simulated Local VLM
+python scripts/evaluate_vqa.py --provider simulated
+
+# Mode C: Real Gemini/OpenAI API (Requires active API keys and ENABLE_LIVE_VLM_TESTS=true)
+python scripts/evaluate_vqa.py --provider gemini
+```
+All results are saved to [reports/evaluation/generation_results.json](file:///home/kamalesh/RAG_Project/reports/evaluation/generation_results.json).
+Detailed analysis is documented in [reports/PHASE6_EVALUATION.md](file:///home/kamalesh/RAG_Project/reports/PHASE6_EVALUATION.md).
+
+---
+
 ## Project Structure
 ```
 Multimodal-RAG-vqa/
@@ -266,7 +291,8 @@ Multimodal-RAG-vqa/
 │   ├── test_retrieval.py # Query retrieval validation and performance metrics comparison
 │   └── test_generation.py # Grounded VQA answer generation unit, visual, and prompt-injection tests
 ├── reports/
-│   └── PROJECT_PROGRESS.md
+│   ├── PROJECT_PROGRESS.md
+│   └── PHASE6_EVALUATION.md # Phase 6 evaluation report
 ├── .env.example
 ├── .gitignore
 ├── requirements.txt
@@ -282,6 +308,6 @@ Multimodal-RAG-vqa/
 - [x] **Phase 3 — Embeddings & Vector Storage**: Page-level visual and text embedding generation using OpenCLIP/SentenceTransformers and FAISS indexing.
 - [x] **Phase 4 — Multimodal Retrieval**: Exact search, document-isolation filtering, min-max score calibration, and WAM score fusion.
 - [x] **Phase 5 — Gemini Multimodal Grounded Answer Generation**: Structured VQA answers extraction, prompt-injection defense, no-answer checks, and citation metadata.
-- [ ] **Phase 6 — Accuracy & Grounding**: Reranking and confidence estimation.
+- [x] **Phase 6 — Evaluation, Accuracy Improvement & RAG Optimization**: Systematically evaluate and optimize retrieval using Recall@K, MRR, min-max score calibration, query-aware weight adapters, and RRF.
 - [ ] **Phase 7 — Custom Frontend**: React/Streamlit interface.
 - [ ] **Phase 8 — Evaluation**: Systematic testing of retrieval accuracy and answer quality.

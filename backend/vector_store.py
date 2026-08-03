@@ -296,3 +296,72 @@ class VectorStore:
             if pid != -1:
                 results.append((int(pid), float(score)))
         return results
+
+    @classmethod
+    def validate_index_sync(cls) -> dict:
+        """
+        Checks SQLite database pages table against FAISS text and image index maps for sync consistency.
+        Returns detailed report containing list of orphans (missing database pages, or missing index vectors).
+        """
+        # Get all page IDs from SQLite database
+        from backend.database import get_db_connection
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, doc_id, page_number FROM pages")
+            db_pages = cursor.fetchall()
+            
+        db_pids = {row["id"]: (row["doc_id"], row["page_number"]) for row in db_pages}
+        
+        # Extract page IDs from FAISS index maps
+        text_pids = set()
+        if cls._text_index is not None:
+            try:
+                text_pids = set(faiss.vector_to_array(cls._text_index.id_map).tolist())
+            except Exception:
+                pass
+                
+        image_pids = set()
+        if cls._image_index is not None:
+            try:
+                image_pids = set(faiss.vector_to_array(cls._image_index.id_map).tolist())
+            except Exception:
+                pass
+                
+        db_pid_set = set(db_pids.keys())
+        
+        # Detect consistency mismatches
+        # 1. DB page exists, but missing from text index (if it has text)
+        missing_text_vectors = []
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, doc_id, page_number FROM pages WHERE ocr_text IS NOT NULL AND trim(ocr_text) != ''")
+            db_text_pages = cursor.fetchall()
+        for r in db_text_pages:
+            pid = r["id"]
+            if pid not in text_pids:
+                missing_text_vectors.append({"page_id": pid, "doc_id": r["doc_id"], "page_number": r["page_number"]})
+                
+        # 2. DB page exists, but missing from image index
+        missing_image_vectors = []
+        for pid, (doc_id, page_num) in db_pids.items():
+            if pid not in image_pids:
+                missing_image_vectors.append({"page_id": pid, "doc_id": doc_id, "page_number": page_num})
+                
+        # 3. Vector exists in index, but DB row missing (orphans in index)
+        stale_text_vectors = list(text_pids - db_pid_set)
+        stale_image_vectors = list(image_pids - db_pid_set)
+        
+        is_synchronized = (
+            len(missing_text_vectors) == 0 and
+            len(missing_image_vectors) == 0 and
+            len(stale_text_vectors) == 0 and
+            len(stale_image_vectors) == 0
+        )
+        
+        return {
+            "is_synchronized": is_synchronized,
+            "missing_text_vectors": missing_text_vectors,
+            "missing_image_vectors": missing_image_vectors,
+            "stale_text_vectors": stale_text_vectors,
+            "stale_image_vectors": stale_image_vectors
+        }

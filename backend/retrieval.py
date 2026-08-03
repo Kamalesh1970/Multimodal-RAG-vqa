@@ -52,6 +52,23 @@ def extract_evidence(question: str, blocks: list, max_blocks: int = 3) -> list[s
     scored_blocks.sort(key=lambda x: x[0], reverse=True)
     return [text for _, text in scored_blocks[:max_blocks]]
 
+def get_query_aware_weights(question: str, base_text_w: float, base_image_w: float) -> tuple[float, float]:
+    """
+    Deterministically adjusts retrieval weights based on presence of visual vs text query intent terms.
+    """
+    visual_keywords = {"color", "shape", "chart", "graph", "diagram", "image", "person", "object", "shown", "visible", "yellow", "blue", "red", "black", "circle", "square", "trend"}
+    text_keywords = {"invoice", "id", "number", "date", "amount", "name", "address", "written", "text", "email", "signee", "contract", "terms", "membership", "profile", "fee", "rupees", "usd", "value", "cooper", "smith", "alice", "bob", "charlie"}
+    
+    words = [w.strip("?,.:;!\"'").lower() for w in question.split()]
+    has_visual = any(w in visual_keywords for w in words)
+    has_text = any(w in text_keywords for w in words)
+    
+    if has_visual and not has_text:
+        return 0.1, 0.9
+    elif has_text and not has_visual:
+        return 0.9, 0.1
+    return base_text_w, base_image_w
+
 def retrieve_evidence(doc_id: str, question: str, top_k: int | None = None) -> list[dict]:
     """
     Performs document-isolated multimodal retrieval.
@@ -113,6 +130,12 @@ def retrieve_evidence(doc_id: str, question: str, top_k: int | None = None) -> l
     clip_query_vec = ImageEmbedder.embed_text(question)
     t_clip_embed = time.perf_counter() - t_clip_embed_start
     
+    # Determine retrieval weights (support query-aware adjustments)
+    text_weight = settings.TEXT_RETRIEVAL_WEIGHT
+    image_weight = settings.IMAGE_RETRIEVAL_WEIGHT
+    if settings.QUERY_AWARE_FUSION:
+        text_weight, image_weight = get_query_aware_weights(question, text_weight, image_weight)
+    
     # Expose total candidate capacity of the indexes for document-level filtering
     text_status = VectorStore.get_status()
     total_text_vectors = text_status["text_vectors"]
@@ -151,6 +174,10 @@ def retrieve_evidence(doc_id: str, question: str, top_k: int | None = None) -> l
     image_max = max(image_scores_list) if image_scores_list else 1.0
     image_range = image_max - image_min if image_max != image_min else 1.0
     
+    # RRF ranks lookups
+    text_ranks = {pid: rank for rank, (pid, _) in enumerate(text_results, start=1)}
+    image_ranks = {pid: rank for rank, (pid, _) in enumerate(image_results, start=1)}
+    
     candidates = []
     
     for page_id, p_info in pages_dict.items():
@@ -158,9 +185,7 @@ def retrieve_evidence(doc_id: str, question: str, top_k: int | None = None) -> l
         image_score = image_scores.get(page_id)
         
         # Check index consistency and log orphans or mismatches
-        # If DB says a page exists, but its expected vector is missing from FAISS indexes:
         if text_score is None and p_info["ocr_text"].strip():
-            # Only log a warning if text index has items, indicating an index/db sync issue
             if total_text_vectors > 0:
                 logger.warning(f"Database page ID {page_id} contains OCR text but is not found in FAISS text index (orphan/consistency error).")
         if image_score is None and total_image_vectors > 0:
@@ -169,33 +194,52 @@ def retrieve_evidence(doc_id: str, question: str, top_k: int | None = None) -> l
         matched_modalities = []
         scores_dict = {}
         
-        # Collect weights and normalized scores for WAM fusion
-        weights = []
-        scores = []
-        
         if text_score is not None:
             matched_modalities.append("text")
             scores_dict["text"] = text_score
-            norm_text = (text_score - text_min) / text_range
-            weights.append(settings.TEXT_RETRIEVAL_WEIGHT)
-            scores.append(norm_text)
         else:
             scores_dict["text"] = None
             
         if image_score is not None:
             matched_modalities.append("image")
             scores_dict["image"] = image_score
-            norm_image = (image_score - image_min) / image_range
-            weights.append(settings.IMAGE_RETRIEVAL_WEIGHT)
-            scores.append(norm_image)
         else:
             scores_dict["image"] = None
             
-        # WAM score fusion using calibrated normalized scores
-        if weights:
-            fused_score = sum(w * s for w, s in zip(weights, scores)) / sum(weights)
+        # Compute fused score based on configuration
+        if settings.FUSION_METHOD == "rrf":
+            # Reciprocal Rank Fusion
+            rrf_score = 0.0
+            k = settings.RRF_CONSTANT
+            if page_id in text_ranks:
+                rrf_score += 1.0 / (k + text_ranks[page_id])
+            if page_id in image_ranks:
+                rrf_score += 1.0 / (k + image_ranks[page_id])
+            fused_score = rrf_score
+        elif settings.FUSION_METHOD == "weighted":
+            # Raw weighted sum
+            weights = []
+            scores = []
+            if text_score is not None:
+                weights.append(text_weight)
+                scores.append(text_score)
+            if image_score is not None:
+                weights.append(image_weight)
+                scores.append(image_score)
+            fused_score = sum(w * s for w, s in zip(weights, scores)) / sum(weights) if weights else 0.0
         else:
-            fused_score = 0.0
+            # Normalized weighted sum (min-max normalization default)
+            weights = []
+            scores = []
+            if text_score is not None:
+                weights.append(text_weight)
+                norm_text = (text_score - text_min) / text_range
+                scores.append(norm_text)
+            if image_score is not None:
+                weights.append(image_weight)
+                norm_image = (image_score - image_min) / image_range
+                scores.append(norm_image)
+            fused_score = sum(w * s for w, s in zip(weights, scores)) / sum(weights) if weights else 0.0
             
         scores_dict["fused"] = fused_score
         

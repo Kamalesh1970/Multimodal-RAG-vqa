@@ -9,7 +9,7 @@ import fitz
 from backend.config import settings
 from backend.database import get_db_connection
 from backend.retrieval import retrieve_evidence
-from backend.generation.answer_generator import generate_grounded_answer
+from backend.generation.answer_generator import generate_grounded_answer, GeminiAnswerResponse
 
 # Helper function to generate shape drawings for visual VQA
 def draw_visual_shape(color: str, shape: str) -> bytes:
@@ -54,43 +54,44 @@ def skip_if_no_api_key():
 # Offline Moked Unit Tests
 # =====================================================================
 
-@patch("backend.generation.gemini_client.get_gemini_client")
-def test_offline_retrieve_and_ask_flow(mock_get_client, client):
+@patch("backend.generation.answer_generator.generate_content_with_retry")
+def test_offline_retrieve_and_ask_flow(mock_generate, client):
     """
     Offline sanity test mocking the Gemini API response.
     Verifies retrieval context assembly, routing, Pydantic validation,
     and HTTP response mapping.
     """
-    # Generate test document upload
-    pdf_bytes = draw_visual_shape("red", "circle")
-    response = client.post("/documents/upload", files={"file": ("circle.png", pdf_bytes, "image/png")})
-    assert response.status_code == 200
-    doc_id = response.json()["doc_id"]
+    original_provider = settings.VLM_PROVIDER
+    settings.VLM_PROVIDER = "gemini"
     
-    # Mock client and generate_content behavior
-    mock_client = MagicMock()
-    mock_response = MagicMock()
-    # Structured response text
-    mock_response.text = json.dumps({
-        "answer": "A red circle is present.",
-        "answerable": True,
-        "grounding_explanation": "Identified from visual page image.",
-        "pages_used": [1],
-        "evidence": [{"page_number": 1, "text": "red circle"}]
-    })
-    mock_client.models.generate_content.return_value = mock_response
-    mock_get_client.return_value = mock_client
-    
-    # Trigger ask endpoint
-    response = client.post("/ask", json={"doc_id": doc_id, "question": "What is shown in the image?"})
-    assert response.status_code == 200
-    data = response.json()
-    
-    assert data["answer"] == "A red circle is present."
-    assert data["answerable"] is True
-    assert data["pages_used"] == [1]
-    assert data["grounding_type"] == "visual-supported" # classified visually because OCR has no text matching "red circle"
-    assert data["evidence"][0]["page_number"] == 1
+    try:
+        # Generate test document upload
+        pdf_bytes = draw_visual_shape("red", "circle")
+        response = client.post("/documents/upload", files={"file": ("circle.png", pdf_bytes, "image/png")})
+        assert response.status_code == 200
+        doc_id = response.json()["doc_id"]
+        
+        # Mock generator return value directly
+        mock_generate.return_value = json.dumps({
+            "answer": "A red circle is present.",
+            "answerable": True,
+            "grounding_explanation": "Identified from visual page image.",
+            "pages_used": [1],
+            "evidence": [{"page_number": 1, "text": "red circle"}]
+        })
+        
+        # Trigger ask endpoint
+        response = client.post("/ask", json={"doc_id": doc_id, "question": "What is shown in the image?"})
+        assert response.status_code == 200
+        data = response.json()
+        
+        assert data["answer"] == "A red circle is present."
+        assert data["answerable"] is True
+        assert data["pages_used"] == [1]
+        assert data["grounding_type"] == "visual-supported" # classified visually because OCR has no text matching "red circle"
+        assert data["evidence"][0]["page_number"] == 1
+    finally:
+        settings.VLM_PROVIDER = original_provider
 
 @patch("backend.generation.openai_client.get_openai_client")
 def test_offline_retrieve_and_ask_flow_openai(mock_get_client, client):
@@ -157,6 +158,8 @@ def test_offline_ask_invalid_requests(client):
 
 @pytest.mark.gemini
 @pytest.mark.openai
+@pytest.mark.simulated
+@pytest.mark.live_vlm
 def test_live_exact_ocr_grounding(client):
     """Verify exact value extraction matches invoice content under real VLM execution."""
     skip_if_no_api_key()
@@ -184,6 +187,8 @@ def test_live_exact_ocr_grounding(client):
 
 @pytest.mark.gemini
 @pytest.mark.openai
+@pytest.mark.simulated
+@pytest.mark.live_vlm
 def test_live_visual_only_vqa(client):
     """Verify cross-modal visual VQA: queries properties not represented in text."""
     skip_if_no_api_key()
@@ -205,6 +210,8 @@ def test_live_visual_only_vqa(client):
 
 @pytest.mark.gemini
 @pytest.mark.openai
+@pytest.mark.simulated
+@pytest.mark.live_vlm
 def test_live_chart_vqa(client):
     """Verify visual trend chart reasoning on trend graph lines."""
     skip_if_no_api_key()
@@ -224,6 +231,8 @@ def test_live_chart_vqa(client):
 
 @pytest.mark.gemini
 @pytest.mark.openai
+@pytest.mark.simulated
+@pytest.mark.live_vlm
 def test_live_unanswerable_query(client):
     """Verify answerable=false response on impossible queries without hallucination."""
     skip_if_no_api_key()
@@ -247,6 +256,8 @@ def test_live_unanswerable_query(client):
 
 @pytest.mark.gemini
 @pytest.mark.openai
+@pytest.mark.simulated
+@pytest.mark.live_vlm
 def test_live_multipage_pdf_vqa(client):
     """Verify multi-page RAG retrieval alignment and pages citations output."""
     skip_if_no_api_key()
@@ -279,6 +290,8 @@ def test_live_multipage_pdf_vqa(client):
 
 @pytest.mark.gemini
 @pytest.mark.openai
+@pytest.mark.simulated
+@pytest.mark.live_vlm
 def test_live_document_prompt_injection_mitigation(client):
     """Verify system instructions are protected against adversarial text within document OCR."""
     skip_if_no_api_key()
@@ -310,6 +323,8 @@ def test_live_document_prompt_injection_mitigation(client):
 
 @pytest.mark.gemini
 @pytest.mark.openai
+@pytest.mark.simulated
+@pytest.mark.live_vlm
 def test_live_rag_system_metrics_evaluation(client):
     """
     Evaluates retrieval success, answer correctness, and hallucination rates 
@@ -593,18 +608,28 @@ def test_offline_provider_selection_isolation(mock_get_gemini, mock_get_openai, 
     finally:
         settings.VLM_PROVIDER = original_provider
 
-@patch("backend.generation.openai_client.generate_openai_content_with_retry")
-def test_offline_ocr_budget_truncation(mock_generate, client):
+@patch("backend.generation.answer_generator.retrieve_evidence")
+@patch("backend.generation.answer_generator.generate_openai_content_with_retry")
+def test_offline_ocr_budget_truncation(mock_generate, mock_retrieve, client):
     """Verify that prompt builder respects MAX_OCR_CONTEXT_CHARS and preserves safety truncates."""
     original_provider = settings.VLM_PROVIDER
     settings.VLM_PROVIDER = "openai"
     
-    # Configure tiny OCR budget of 100 characters
+    # Configure OCR budget of 300 characters
     original_budget = settings.MAX_OCR_CONTEXT_CHARS
-    settings.MAX_OCR_CONTEXT_CHARS = 100
+    settings.MAX_OCR_CONTEXT_CHARS = 300
     
     try:
-        # Mock generation return value
+        # Mock retrieval to return a long context snippet
+        mock_retrieve.return_value = [{
+            "page_id": 1,
+            "page_number": 1,
+            "scores": {"fused": 1.0, "text": 1.0, "image": 1.0},
+            "matched_modalities": ["text"],
+            "evidence_text": ["A" * 500]
+        }]
+        
+        # Mock VLM response
         mock_generate.return_value = json.dumps({
             "answer": "test text",
             "answerable": True,
@@ -613,10 +638,20 @@ def test_offline_ocr_budget_truncation(mock_generate, client):
             "evidence": []
         })
         
-        pdf_bytes = draw_visual_shape("red", "circle")
-        response = client.post("/documents/upload", files={"file": ("circle.png", pdf_bytes, "image/png")})
-        doc_id = response.json()["doc_id"]
+        # We can use a dummy doc ID since retrieval is mocked
+        doc_id = "4135df8e-07ad-444a-b6c5-6fc58aa66990"
         
+        # Populate DB entries manually to pass documents/pages validation
+        with get_db_connection() as conn:
+            conn.execute(
+                "INSERT INTO documents (doc_id, filename, file_type, status, page_count) VALUES (?, ?, ?, ?, ?)",
+                (doc_id, "dummy.pdf", "pdf", "completed", 1)
+            )
+            conn.execute(
+                "INSERT INTO pages (doc_id, page_number, width, height, ocr_text, ocr_blocks_json) VALUES (?, ?, ?, ?, ?, ?)",
+                (doc_id, 1, 100, 100, "dummy", "[]")
+            )
+            
         response = client.post("/ask", json={"doc_id": doc_id, "question": "Where is the circle?"})
         assert response.status_code == 200
         
@@ -630,7 +665,7 @@ def test_offline_ocr_budget_truncation(mock_generate, client):
         settings.VLM_PROVIDER = original_provider
         settings.MAX_OCR_CONTEXT_CHARS = original_budget
 
-@patch("backend.generation.openai_client.generate_openai_content_with_retry")
+@patch("backend.generation.answer_generator.generate_openai_content_with_retry")
 def test_offline_max_images_bound(mock_generate, client):
     """Verify that images sent to VLM never exceed MAX_VLM_IMAGES constraint."""
     original_provider = settings.VLM_PROVIDER
