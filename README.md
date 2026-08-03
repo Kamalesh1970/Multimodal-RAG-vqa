@@ -99,3 +99,4 @@ Multimodal-RAG-vqa/
 - [ ] **Phase 7 — Custom Frontend**: React/Streamlit interface.
 - [ ] **Phase 8 — Evaluation**: Systematic testing of retrieval accuracy and answer quality.
 # Multimodal-RAG-vqa
+# Multimodal-RAG-vqa
