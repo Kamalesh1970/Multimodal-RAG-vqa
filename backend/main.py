@@ -4,6 +4,8 @@ import json
 from contextlib import asynccontextmanager
 # pyrefly: ignore [missing-import]
 from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from backend.config import settings
 from backend.database import init_db, get_db_connection
@@ -70,16 +72,16 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Serve static frontend assets and processed page images
+app.mount("/frontend", StaticFiles(directory="frontend"), name="frontend")
+app.mount("/processed", StaticFiles(directory=str(settings.PROCESSED_DIR)), name="processed")
+
 @app.get("/")
 def read_root():
     """
-    Root endpoint containing basic project information.
+    Root endpoint serving the static HTML frontend.
     """
-    return {
-        "project": "Multimodal RAG for Visual Question Answering (VQA)",
-        "phase": 2,
-        "status": "running"
-    }
+    return FileResponse("frontend/index.html")
 
 @app.get("/health", status_code=200)
 def health_check():
@@ -90,6 +92,25 @@ def health_check():
         "status": "healthy",
         "service": "Multimodal RAG VQA",
         "phase": 2
+    }
+
+@app.get("/system/status", status_code=200)
+def system_status():
+    """
+    Returns runtime configuration status and simulation details.
+    """
+    is_simulated = (settings.VLM_PROVIDER == "local")
+    if settings.VLM_PROVIDER == "gemini" and not settings.GEMINI_API_KEY:
+        is_simulated = True
+    elif settings.VLM_PROVIDER == "openai" and not settings.OPENAI_API_KEY:
+        is_simulated = True
+        
+    return {
+        "status": "healthy",
+        "project": "Multimodal RAG for Visual Question Answering (VQA)",
+        "phase": 7,
+        "vlm_provider": settings.VLM_PROVIDER,
+        "generation_mode": "simulated" if is_simulated else "live"
     }
 
 @app.post("/documents/upload", status_code=200)

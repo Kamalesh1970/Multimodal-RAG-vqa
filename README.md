@@ -219,6 +219,29 @@ python -m uvicorn backend.main:app --reload
 
 ---
 
+## Running the Application (Phase 7 Custom Frontend)
+
+The application co-hosts a lightweight, professional document analysis and research tool frontend. Running the FastAPI server automatically boots up both the backend API and the static web page.
+
+### 1. Launch backend & serve frontend
+```bash
+uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+### 2. Access the Document Analysis Interface
+Open your browser and navigate to:
+[http://127.0.0.1:8000/](http://127.0.0.1:8000/)
+
+### 3. Usage Flow
+- **Upload**: Drag & drop any `.pdf`, `.png`, `.jpg`, or `.jpeg` file onto the dropzone area.
+- **Ingestion**: The system extracts text pages, performs PaddleOCR text segmentation, generates semantic vector embeddings, and builds indexes.
+- **Preview**: View the layout image preview for images or navigate page-by-page for multi-page PDFs using the control buttons.
+- **Question**: Select from the suggested quick queries or write custom questions inside the bottom input box (Enter to send, Shift+Enter for newline).
+- **Grounded Answer**: Read the generated answer, check cited source page listings, review the cited text snippets under "Evidence", and expand "Grounding Details" to see similarity scores.
+- **New Session**: Click **New Document** to clear the conversation and ingest a new file.
+
+---
+
 ## Running Tests
 
 Run the full automated test suite using pytest:
@@ -309,5 +332,5 @@ Multimodal-RAG-vqa/
 - [x] **Phase 4 — Multimodal Retrieval**: Exact search, document-isolation filtering, min-max score calibration, and WAM score fusion.
 - [x] **Phase 5 — Gemini Multimodal Grounded Answer Generation**: Structured VQA answers extraction, prompt-injection defense, no-answer checks, and citation metadata.
 - [x] **Phase 6 — Evaluation, Accuracy Improvement & RAG Optimization**: Systematically evaluate and optimize retrieval using Recall@K, MRR, min-max score calibration, query-aware weight adapters, and RRF.
-- [ ] **Phase 7 — Custom Frontend**: React/Streamlit interface.
-- [ ] **Phase 8 — Evaluation**: Systematic testing of retrieval accuracy and answer quality.
+- [x] **Phase 7 — Custom Frontend**: Minimal responsive static document viewer and research Q&A tool (HTML/CSS/JS) served directly from the backend.
+- [ ] **Phase 8 — Final Integration, Real VLM Validation, Production Readiness & Final Project Evaluation**: Systematic testing of retrieval accuracy and answer quality.

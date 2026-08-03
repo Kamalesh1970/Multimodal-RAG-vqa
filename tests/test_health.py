@@ -6,15 +6,27 @@ from backend.database import get_db_connection
 
 def test_read_root():
     """
-    Test that GET / returns the correct status and project info.
+    Test that GET / returns the frontend HTML document.
     """
     with TestClient(app) as client:
         response = client.get("/")
         assert response.status_code == 200
+        assert "text/html" in response.headers["content-type"]
+        assert b"Multimodal RAG" in response.content
+
+def test_system_status():
+    """
+    Test that GET /system/status returns correct system metadata and runtime modes.
+    """
+    with TestClient(app) as client:
+        response = client.get("/system/status")
+        assert response.status_code == 200
         json_data = response.json()
+        assert json_data["status"] == "healthy"
         assert "project" in json_data
-        assert json_data["phase"] == 2
-        assert json_data["status"] == "running"
+        assert json_data["phase"] == 7
+        assert "vlm_provider" in json_data
+        assert "generation_mode" in json_data
 
 def test_health_check():
     """

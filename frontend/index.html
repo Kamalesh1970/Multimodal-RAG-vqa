@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multimodal RAG VQA - Document Analysis Tool</title>
+    <link rel="stylesheet" href="/frontend/css/styles.css">
+</head>
+<body>
+    <header class="app-header">
+        <div class="header-logo">
+            <h1>Multimodal RAG</h1>
+            <span class="header-subtitle">Visual Document Question Answering</span>
+        </div>
+        <div class="header-status">
+            <span id="connection-badge" class="badge badge-checking">Checking Connection...</span>
+        </div>
+    </header>
+
+    <main class="app-layout">
+        <!-- Left Panel: Document Upload and Preview -->
+        <section class="panel doc-panel" aria-label="Document Management">
+            <div class="panel-section-header">
+                <h2>Document Source</h2>
+                <button id="new-doc-btn" class="btn btn-secondary" style="display: none;">New Document</button>
+            </div>
+
+            <!-- Upload Dropzone -->
+            <div id="dropzone" class="dropzone">
+                <input type="file" id="file-input" accept=".jpg,.jpeg,.png,.pdf" style="display: none;">
+                <div class="dropzone-prompt">
+                    <svg class="icon-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+                    </svg>
+                    <p class="dropzone-text-primary">Drag & drop document here</p>
+                    <p class="dropzone-text-secondary">PDF, PNG, JPG, or JPEG up to 20MB</p>
+                    <button type="button" id="browse-btn" class="btn btn-primary">Browse Files</button>
+                </div>
+            </div>
+
+            <!-- Ingestion Progress / Processing Stages -->
+            <div id="processing-container" class="processing-container" style="display: none;">
+                <div class="spinner"></div>
+                <div id="processing-message" class="processing-message">Uploading document...</div>
+            </div>
+
+            <!-- Document Metadata & Preview -->
+            <div id="doc-active-view" class="doc-active-view" style="display: none;">
+                <div class="doc-metadata">
+                    <div class="metadata-row">
+                        <span class="metadata-label">Filename:</span>
+                        <span id="meta-filename" class="metadata-value truncate" title=""></span>
+                    </div>
+                    <div class="metadata-row">
+                        <span class="metadata-label">Format:</span>
+                        <span id="meta-format" class="metadata-value"></span>
+                    </div>
+                    <div class="metadata-row" id="meta-pages-row">
+                        <span class="metadata-label">Pages:</span>
+                        <span id="meta-pages" class="metadata-value"></span>
+                    </div>
+                    <details class="metadata-details">
+                        <summary>Technical Details</summary>
+                        <div class="details-content">
+                            <span class="details-label">Document ID:</span>
+                            <code id="meta-doc-id" class="code-id"></code>
+                        </div>
+                    </details>
+                </div>
+
+                <div class="preview-container">
+                    <h3 class="preview-title">Document Preview</h3>
+                    <!-- PDF native fallback iframe or custom processed images selector -->
+                    <div id="preview-viewport" class="preview-viewport">
+                        <div class="preview-empty">No preview available</div>
+                    </div>
+                    <!-- PDF pages pager controls -->
+                    <div id="preview-pager" class="preview-pager" style="display: none;">
+                        <button id="prev-page-btn" class="btn btn-icon" disabled>&larr;</button>
+                        <span>Page <span id="current-page-num">1</span> of <span id="total-pages-num">1</span></span>
+                        <button id="next-page-btn" class="btn btn-icon" disabled>&rarr;</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Right Panel: Conversation Log -->
+        <section class="panel qa-panel" aria-label="Question Answering">
+            <div class="panel-section-header">
+                <h2>Ask about this document</h2>
+                <div id="simulated-warning" class="simulated-warning-badge" style="display: none;">
+                    Development Mode &middot; Simulated VLM
+                </div>
+            </div>
+
+            <!-- Empty State Suggestions -->
+            <div id="empty-qa-state" class="empty-qa-state">
+                <p>Select a question below, or type your own to analyze the uploaded document.</p>
+                <div class="suggestion-list">
+                    <button class="btn btn-suggestion" data-q="What is the total amount or balance due?">What is the total amount or balance due?</button>
+                    <button class="btn btn-suggestion" data-q="Summarize this document and its key details.">Summarize this document and its key details.</button>
+                    <button class="btn btn-suggestion" data-q="What are the reference numbers, IDs, or dates listed?">What are the reference numbers, IDs, or dates listed?</button>
+                    <button class="btn btn-suggestion" data-q="Explain any shapes, trend lines, or charts shown.">Explain any shapes, trend lines, or charts shown.</button>
+                </div>
+            </div>
+
+            <!-- Conversation Messages Log -->
+            <div id="conversation-container" class="conversation-container" style="display: none;">
+                <!-- Dynamically filled with user and system turns -->
+            </div>
+
+            <!-- Answer Loader -->
+            <div id="answer-loader" class="answer-loader" style="display: none;">
+                <div class="spinner spinner-small"></div>
+                <span id="loader-status">Searching document...</span>
+            </div>
+
+            <!-- Input area -->
+            <div class="qa-input-wrapper">
+                <textarea id="question-input" class="question-input" rows="2" placeholder="Upload a document to begin asking..." disabled></textarea>
+                <button id="send-btn" class="btn btn-primary" disabled>
+                    <svg class="icon-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+                    </svg>
+                </button>
+            </div>
+        </section>
+    </main>
+
+    <footer class="app-footer-bar">
+        <span>Multimodal RAG VQA System &copy; 2026</span>
+    </footer>
+
+    <!-- JavaScript code files -->
+    <script src="/frontend/js/api.js"></script>
+    <script src="/frontend/js/app.js"></script>
+</body>
+</html>

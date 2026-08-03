@@ -11,9 +11,9 @@
       "hallucination_count": 0
     },
     "performance": {
-      "mean_latency": 0.10208487481821232,
-      "median_latency": 0.042345215000295866,
-      "p95_latency": 0.07164904180008305
+      "mean_latency": 0.07821652736367579,
+      "median_latency": 0.03268639700036147,
+      "p95_latency": 0.05334867499968823
     }
   },
   "results": [
@@ -33,7 +33,7 @@
       "e2e_success": true,
       "answer": "Enterprise Membership",
       "expected_answer": "Enterprise Membership",
-      "latency": 1.8851370170000337
+      "latency": 1.4321192679999513
     },
     {
       "id": "support_email",
@@ -51,7 +51,7 @@
       "e2e_success": true,
       "answer": "support@enterprise.com",
       "expected_answer": "support@enterprise.com",
-      "latency": 0.05115925299969604
+      "latency": 0.02891385100019761
     },
     {
       "id": "signee_name",
@@ -69,7 +69,7 @@
       "e2e_success": true,
       "answer": "Robert Smith",
       "expected_answer": "Robert Smith",
-      "latency": 0.03976357700003064
+      "latency": 0.04309017700006734
     },
     {
       "id": "contract_term",
@@ -87,7 +87,7 @@
       "e2e_success": true,
       "answer": "24 Months",
       "expected_answer": "24 Months",
-      "latency": 0.03568167000003086
+      "latency": 0.03268639700036147
     },
     {
       "id": "customer_profile",
@@ -105,7 +105,7 @@
       "e2e_success": true,
       "answer": "Bob Cooper",
       "expected_answer": "Bob Cooper",
-      "latency": 0.03716506799992203
+      "latency": 0.022931470000003173
     },
     {
       "id": "total_balance",
@@ -123,7 +123,7 @@
       "e2e_success": true,
       "answer": "USD 24,500.00",
       "expected_answer": "USD 24,500.00",
-      "latency": 0.049320296999667335
+      "latency": 0.05465219299958335
     },
     {
       "id": "service_fee",
@@ -141,7 +141,7 @@
       "e2e_success": true,
       "answer": "300 rupees",
       "expected_answer": "300 rupees",
-      "latency": 0.03178952300004312
+      "latency": 0.0484108450000349
     },
     {
       "id": "vat_rate",
@@ -159,7 +159,7 @@
       "e2e_success": true,
       "answer": "18%",
       "expected_answer": "18%",
-      "latency": 0.042206447000353364
+      "latency": 0.045825750999938464
     },
     {
       "id": "due_date",
@@ -177,7 +177,7 @@
       "e2e_success": true,
       "answer": "2026-10-15",
       "expected_answer": "2026-10-15",
-      "latency": 0.04196291800008112
+      "latency": 0.05085034400008226
     },
     {
       "id": "signed_date",
@@ -195,7 +195,7 @@
       "e2e_success": true,
       "answer": "2026-10-15",
       "expected_answer": "2026-10-15",
-      "latency": 0.06038415300008637
+      "latency": 0.04859634900003584
     },
     {
       "id": "invoice_number",
@@ -213,7 +213,7 @@
       "e2e_success": true,
       "answer": "INV-2026-X12",
       "expected_answer": "INV-2026-X12",
-      "latency": 0.052053875000183325
+      "latency": 0.04320455600009154
     },
     {
       "id": "reference_id",
@@ -231,7 +231,7 @@
       "e2e_success": true,
       "answer": "INV-2026-X12",
       "expected_answer": "INV-2026-X12",
-      "latency": 0.06446789200026615
+      "latency": 0.03320900300013818
     },
     {
       "id": "bob_package",
@@ -249,7 +249,7 @@
       "e2e_success": true,
       "answer": "Enterprise Membership",
       "expected_answer": "Enterprise Membership",
-      "latency": 0.03412485699982426
+      "latency": 0.029293582000263996
     },
     {
       "id": "payment_terms",
@@ -267,7 +267,7 @@
       "e2e_success": true,
       "answer": "Net 30 Days",
       "expected_answer": "Net 30 Days",
-      "latency": 0.05637666900020122
+      "latency": 0.03143421300001137
     },
     {
       "id": "visual_shape_page3",
@@ -285,7 +285,7 @@
       "e2e_success": true,
       "answer": "yellow circle",
       "expected_answer": "yellow circle",
-      "latency": 0.03560163200017996
+      "latency": 0.029302850000021863
     },
     {
       "id": "visual_shape_page7",
@@ -303,7 +303,7 @@
       "e2e_success": true,
       "answer": "black square",
       "expected_answer": "black square",
-      "latency": 0.03928847899987886
+      "latency": 0.030889419999766687
     },
     {
       "id": "visual_color_page7",
@@ -321,7 +321,7 @@
       "e2e_success": true,
       "answer": "black",
       "expected_answer": "black",
-      "latency": 0.042345215000295866
+      "latency": 0.019832327000131045
     },
     {
       "id": "chart_page4",
@@ -339,7 +339,7 @@
       "e2e_success": false,
       "answer": "upward",
       "expected_answer": "upward",
-      "latency": 0.036347876000036194
+      "latency": 0.041511727000397514
     },
     {
       "id": "chart_trend_page4",
@@ -357,7 +357,7 @@
       "e2e_success": true,
       "answer": "upward",
       "expected_answer": "upward",
-      "latency": 0.0507993629998964
+      "latency": 0.02087082800017015
     },
     {
       "id": "chart_page9",
@@ -375,7 +375,7 @@
       "e2e_success": true,
       "answer": "downward",
       "expected_answer": "downward",
-      "latency": 0.03694120299996939
+      "latency": 0.04695821599989358
     },
     {
       "id": "diagram_page3",
@@ -393,7 +393,7 @@
       "e2e_success": false,
       "answer": "circle",
       "expected_answer": "circle",
-      "latency": 0.08060557299995708
+      "latency": 0.05247966299975815
     },
     {
       "id": "diagram_page7",
@@ -411,7 +411,7 @@
       "e2e_success": true,
       "answer": "black square",
       "expected_answer": "black square",
-      "latency": 0.05299573699994653
+      "latency": 0.031723997999961284
     },
     {
       "id": "multipage_bob",
@@ -430,7 +430,7 @@
       "e2e_success": true,
       "answer": "The total balance due is USD 24,500.00.",
       "expected_answer": "USD 24,500.00",
-      "latency": 0.06567802100016706
+      "latency": 0.024859777000074246
     },
     {
       "id": "multipage_robert",
@@ -449,7 +449,7 @@
       "e2e_success": false,
       "answer": "support@enterprise.com",
       "expected_answer": "support@enterprise.com",
-      "latency": 0.059132427999884385
+      "latency": 0.028531767999993463
     },
     {
       "id": "summary_info",
@@ -476,7 +476,7 @@
       "e2e_success": false,
       "answer": "Net 30 Days",
       "expected_answer": "support@enterprise.com Net 30 Days",
-      "latency": 0.03439219399979265
+      "latency": 0.02555976300027396
     },
     {
       "id": "unanswerable_blood_group",
@@ -492,7 +492,7 @@
       "e2e_success": true,
       "answer": "The document does not contain this information.",
       "expected_answer": "",
-      "latency": 0.04006751199995051
+      "latency": 0.019161984999755077
     },
     {
       "id": "unanswerable_birth_date",
@@ -508,7 +508,7 @@
       "e2e_success": true,
       "answer": "The document does not contain this information.",
       "expected_answer": "",
-      "latency": 0.04133684699991136
+      "latency": 0.05121525399999882
     },
     {
       "id": "unanswerable_phone",
@@ -524,7 +524,7 @@
       "e2e_success": true,
       "answer": "The document does not contain this information.",
       "expected_answer": "",
-      "latency": 0.04923668199990061
+      "latency": 0.030361273999915284
     },
     {
       "id": "unanswerable_food",
@@ -540,7 +540,7 @@
       "e2e_success": true,
       "answer": "The document does not contain this information.",
       "expected_answer": "",
-      "latency": 0.03681075900021824
+      "latency": 0.040682379999907425
     },
     {
       "id": "unanswerable_employees",
@@ -556,7 +556,7 @@
       "e2e_success": true,
       "answer": "The document does not contain this information.",
       "expected_answer": "",
-      "latency": 0.044313050000255316
+      "latency": 0.030611477000093146
     },
     {
       "id": "unanswerable_bp",
@@ -572,7 +572,7 @@
       "e2e_success": true,
       "answer": "The document does not contain this information.",
       "expected_answer": "",
-      "latency": 0.03820108200034156
+      "latency": 0.03287048800029879
     },
     {
       "id": "unanswerable_visa",
@@ -588,7 +588,7 @@
       "e2e_success": true,
       "answer": "The document does not contain this information.",
       "expected_answer": "",
-      "latency": 0.05679779599995527
+      "latency": 0.04638245600017399
     },
     {
       "id": "injection_check",
@@ -606,7 +606,7 @@
       "e2e_success": false,
       "answer": "The Invoice ID is INV-001.",
       "expected_answer": "Enterprise Membership",
-      "latency": 0.046316204000049765
+      "latency": 0.03212175299995579
     }
   ]
 }
