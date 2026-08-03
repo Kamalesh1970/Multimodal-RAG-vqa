@@ -128,7 +128,7 @@ class VectorStore:
         return v.reshape(1, -1)
 
     @classmethod
-    def add_text_vector(cls, page_id: int, vector: np.ndarray):
+    def add_text_vector(cls, page_id: int, vector: np.ndarray, save: bool = True):
         """
         Validates and adds a text vector mapped to pages.id integer key in FAISS text index.
         """
@@ -143,10 +143,11 @@ class VectorStore:
             cls.remove_text_vector(page_id)
             
         cls._text_index.add_with_ids(v, ids)
-        cls.save_indices()
+        if save:
+            cls.save_indices()
 
     @classmethod
-    def add_image_vector(cls, page_id: int, vector: np.ndarray):
+    def add_image_vector(cls, page_id: int, vector: np.ndarray, save: bool = True):
         """
         Validates and adds an image vector mapped to pages.id integer key in FAISS image index.
         """
@@ -161,7 +162,8 @@ class VectorStore:
             cls.remove_image_vector(page_id)
             
         cls._image_index.add_with_ids(v, ids)
-        cls.save_indices()
+        if save:
+            cls.save_indices()
 
     @classmethod
     def has_text_vector(cls, page_id: int) -> bool:

@@ -83,33 +83,36 @@ def process_image_file(stored_path: Path, doc_id: str) -> List[PageOCRResult]:
     Loads and runs OCR on a standard image file.
     """
     try:
-        pil_img = Image.open(stored_path)
+        with Image.open(stored_path) as pil_img:
+            pil_img_rgb = preprocess_image(pil_img)
+            width, height = pil_img_rgb.size
+            
+            # Save the preprocessed image to processed dir for Phase 3 visual embedding
+            out_dir = settings.PROCESSED_DIR / doc_id
+            out_dir.mkdir(parents=True, exist_ok=True)
+            page_image_path = out_dir / "page_1.jpg"
+            pil_img_rgb.save(page_image_path, "JPEG", quality=85)
+            
+            img_arr = np.array(pil_img_rgb)
     except Exception as e:
         logger.error(f"Failed to open saved image: {e}")
         raise IngestionError(400, "Invalid image format on disk.")
 
-    pil_img = preprocess_image(pil_img)
-    width, height = pil_img.size
-    
-    # Save the preprocessed image to processed dir for Phase 3 visual embedding
-    out_dir = settings.PROCESSED_DIR / doc_id
-    out_dir.mkdir(parents=True, exist_ok=True)
-    page_image_path = out_dir / "page_1.jpg"
-    pil_img.save(page_image_path, "JPEG", quality=85)
-    
-    img_arr = np.array(pil_img)
-    
     logger.info(f"Running OCR on image {stored_path.name} ({width}x{height})...")
     ocr_start = time.perf_counter()
     page_result = perform_ocr(img_arr, page_number=1, width=width, height=height)
     ocr_time = time.perf_counter() - ocr_start
     
     logger.info(f"OCR page 1 completed. Blocks={len(page_result.blocks)}, processing_time={ocr_time:.2f}s")
+    
+    # Explicit cleanup
+    del img_arr
+    
     return [page_result]
 
 def process_pdf_file(stored_path: Path, doc_id: str) -> List[PageOCRResult]:
     """
-    Renders PDF pages to images at 200 DPI, runs preprocessing and OCR on each page.
+    Renders PDF pages to images at configurable DPI, runs preprocessing and OCR on each page.
     """
     try:
         doc = fitz.open(stored_path)
@@ -119,33 +122,34 @@ def process_pdf_file(stored_path: Path, doc_id: str) -> List[PageOCRResult]:
 
     page_results = []
     
-    # Render resolution matrix (200 DPI)
-    zoom = 200.0 / 72.0
+    # Render resolution matrix based on configuration
+    render_dpi = getattr(settings, "PDF_RENDER_DPI", 150)
+    zoom = float(render_dpi) / 72.0
     matrix = fitz.Matrix(zoom, zoom)
     
     for i in range(len(doc)):
         page_number = i + 1
         page = doc[i]
         
-        logger.info(f"Rendering PDF page {page_number}/{len(doc)} at 200 DPI...")
+        logger.info(f"Rendering PDF page {page_number}/{len(doc)} at {render_dpi} DPI...")
         render_start = time.perf_counter()
         try:
             pix = page.get_pixmap(matrix=matrix)
             img_bytes = pix.tobytes("png")
             render_time = time.perf_counter() - render_start
             
-            # Load in Pillow
-            pil_img = Image.open(io.BytesIO(img_bytes))
-            pil_img = preprocess_image(pil_img)
-            width, height = pil_img.size
-            
-            # Save preprocessed page image to processed dir for Phase 3 visual embedding
-            out_dir = settings.PROCESSED_DIR / doc_id
-            out_dir.mkdir(parents=True, exist_ok=True)
-            page_image_path = out_dir / f"page_{page_number}.jpg"
-            pil_img.save(page_image_path, "JPEG", quality=85)
-            
-            img_arr = np.array(pil_img)
+            # Load in Pillow within a context manager to auto-release memory
+            with Image.open(io.BytesIO(img_bytes)) as pil_img:
+                pil_img_rgb = preprocess_image(pil_img)
+                width, height = pil_img_rgb.size
+                
+                # Save preprocessed page image to processed dir for Phase 3 visual embedding
+                out_dir = settings.PROCESSED_DIR / doc_id
+                out_dir.mkdir(parents=True, exist_ok=True)
+                page_image_path = out_dir / f"page_{page_number}.jpg"
+                pil_img_rgb.save(page_image_path, "JPEG", quality=85)
+                
+                img_arr = np.array(pil_img_rgb)
         except Exception as render_err:
             logger.error(f"Failed to render page {page_number}: {render_err}")
             raise IngestionError(500, f"Error rendering PDF page {page_number}.")
@@ -157,6 +161,10 @@ def process_pdf_file(stored_path: Path, doc_id: str) -> List[PageOCRResult]:
         
         logger.info(f"OCR page {page_number} completed. Blocks={len(page_result.blocks)}, processing_time={ocr_time:.2f}s")
         page_results.append(page_result)
+        
+        # Explicit cleanup of large page buffers to free RAM
+        pix = None
+        del img_arr
         
     return page_results
 
@@ -266,40 +274,65 @@ def ingest_document(file_bytes: bytes, filename: str) -> Dict[str, Any]:
             from backend.embeddings.image_embedder import ImageEmbedder
             from backend.vector_store import VectorStore
             
+            # Prepare batch texts and images
+            pages_to_embed_text = []
+            pages_to_embed_image = []
+            
             for page_info in inserted_pages:
                 page_id = page_info["page_id"]
                 page_number = page_info["page_number"]
                 full_text = page_info["full_text"]
-                
-                # Path to the saved page image
                 page_image_path = settings.PROCESSED_DIR / doc_id / f"page_{page_number}.jpg"
                 
-                # Text Embedding
-                text_indexed = 0
                 if full_text and full_text.strip():
-                    try:
-                        text_vec = TextEmbedder.embed_text(full_text)
-                        if text_vec is not None:
-                            VectorStore.add_text_vector(page_id, text_vec)
-                            text_indexed = 1
-                    except Exception as te_err:
-                        logger.error(f"Failed to generate text embedding for page {page_id}: {te_err}", exc_info=True)
-                
-                # Image Embedding
-                image_indexed = 0
+                    pages_to_embed_text.append((page_id, full_text))
+                    
                 if page_image_path.exists():
-                    try:
-                        pil_img = Image.open(page_image_path)
-                        image_vec = ImageEmbedder.embed_image(pil_img)
-                        VectorStore.add_image_vector(page_id, image_vec)
-                        image_indexed = 1
-                    except Exception as ie_err:
-                        logger.error(f"Failed to generate image embedding for page {page_id}: {ie_err}", exc_info=True)
-                else:
-                    logger.warning(f"Page image path {page_image_path} does not exist. Skipping image embedding.")
-                
-                # Update database record with indexing status and models
-                with get_db_connection() as conn:
+                    pages_to_embed_image.append((page_id, page_image_path))
+            
+            # Batch Text Embeddings
+            text_vectors = []
+            if pages_to_embed_text:
+                texts = [item[1] for item in pages_to_embed_text]
+                try:
+                    text_vectors = TextEmbedder.embed_texts(texts)
+                except Exception as err:
+                    logger.error(f"Batch text embedding failed: {err}", exc_info=True)
+                    
+            # Batch Image Embeddings
+            image_vectors = []
+            if pages_to_embed_image:
+                images = []
+                try:
+                    for item in pages_to_embed_image:
+                        with Image.open(item[1]) as img:
+                            img.load()  # Ensure image data is loaded into memory
+                            images.append(img)
+                    
+                    image_vectors = ImageEmbedder.embed_images(images)
+                except Exception as err:
+                    logger.error(f"Batch image embedding failed: {err}", exc_info=True)
+                    
+            # Index text vectors (without writing to disk immediately)
+            text_indexed_map = {}
+            for (page_id, _), vec in zip(pages_to_embed_text, text_vectors):
+                if vec is not None:
+                    VectorStore.add_text_vector(page_id, vec, save=False)
+                    text_indexed_map[page_id] = True
+                    
+            # Index image vectors (without writing to disk immediately)
+            image_indexed_map = {}
+            for (page_id, _), vec in zip(pages_to_embed_image, image_vectors):
+                if vec is not None:
+                    VectorStore.add_image_vector(page_id, vec, save=False)
+                    image_indexed_map[page_id] = True
+                    
+            # Update database records with indexing status
+            with get_db_connection() as conn:
+                for page_info in inserted_pages:
+                    page_id = page_info["page_id"]
+                    text_ok = 1 if text_indexed_map.get(page_id) else 0
+                    image_ok = 1 if image_indexed_map.get(page_id) else 0
                     conn.execute(
                         """
                         UPDATE pages
@@ -310,15 +343,15 @@ def ingest_document(file_bytes: bytes, filename: str) -> Dict[str, Any]:
                         WHERE id = ?
                         """,
                         (
-                            text_indexed,
-                            image_indexed,
-                            settings.TEXT_EMBEDDING_MODEL if text_indexed else None,
-                            settings.IMAGE_EMBEDDING_MODEL if image_indexed else None,
+                            text_ok,
+                            image_ok,
+                            settings.TEXT_EMBEDDING_MODEL if text_ok else None,
+                            settings.IMAGE_EMBEDDING_MODEL if image_ok else None,
                             page_id
                         )
                     )
             
-            # Save FAISS indices to disk after batch is complete
+            # Save FAISS indices to disk exactly once per document upload
             VectorStore.save_indices()
         except Exception as emb_err:
             logger.error(f"Embedding/Vector indexing failed for doc_id={doc_id}: {emb_err}", exc_info=True)

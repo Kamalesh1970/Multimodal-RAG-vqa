@@ -48,7 +48,7 @@ class ImageEmbedder:
             cls._model = model
             cls._preprocess = preprocess
             cls._tokenizer = tokenizer
-            logger.info("CLIP model loaded successfully.")
+            logger.info("[MODEL_LOAD] CLIP initialized once")
             
         return cls._model, cls._preprocess, cls._tokenizer, cls._device
 
@@ -115,3 +115,36 @@ class ImageEmbedder:
             raise ValueError("Generated CLIP text embedding contains NaN or Inf values.")
             
         return embedding.astype(np.float32)
+
+    @classmethod
+    def embed_images(cls, images: list[Image.Image]) -> list[np.ndarray]:
+        """
+        Embeds a list of PIL Images in a single batch.
+        """
+        if not images:
+            return []
+            
+        import torch
+        model, preprocess, _, device = cls.get_model_and_transforms()
+        
+        try:
+            # Preprocess all images and stack them into a single batch tensor
+            tensors = [preprocess(img) for img in images]
+            img_tensor = torch.stack(tensors).to(device)
+        except Exception as e:
+            logger.error(f"Batch image preprocessing failed: {e}")
+            raise ValueError(f"Invalid image format: {e}") from e
+            
+        with torch.inference_mode():
+            features = model.encode_image(img_tensor)
+            # Normalize embedding along features dimension
+            features /= features.norm(dim=-1, keepdim=True)
+            embeddings = features.cpu().numpy()
+            
+        results = []
+        for embedding in embeddings:
+            if np.isnan(embedding).any() or np.isinf(embedding).any():
+                raise ValueError("Generated image embedding contains NaN or Inf values.")
+            results.append(embedding.astype(np.float32))
+            
+        return results

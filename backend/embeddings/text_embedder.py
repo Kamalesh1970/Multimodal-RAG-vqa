@@ -25,7 +25,7 @@ class TextEmbedder:
             logger.info(f"Loading Text Embedding Model '{settings.TEXT_EMBEDDING_MODEL}' on device: {device}...")
             from sentence_transformers import SentenceTransformer
             cls._model = SentenceTransformer(settings.TEXT_EMBEDDING_MODEL, device=device)
-            logger.info("Text Embedding Model loaded successfully.")
+            logger.info("[MODEL_LOAD] text embedder initialized once")
         return cls._model
 
     @classmethod
@@ -66,8 +66,23 @@ class TextEmbedder:
         return embedding.astype(np.float32)
 
     @classmethod
-    def embed_texts(cls, texts: list[str]) -> list[np.ndarray | None]:
+    def embed_texts(cls, texts: list[str]) -> list[np.ndarray]:
         """
-        Embeds a batch of texts.
+        Embeds a list of texts in a single batch.
         """
-        return [cls.embed_text(t) for t in texts]
+        if not texts:
+            return []
+        model = cls.get_model()
+        import torch
+        with torch.inference_mode():
+            embeddings = model.encode(texts, convert_to_numpy=True, normalize_embeddings=True)
+            
+        results = []
+        for embedding in embeddings:
+            if np.isnan(embedding).any() or np.isinf(embedding).any():
+                raise ValueError("Generated text embedding contains NaN or Inf values.")
+            norm = np.linalg.norm(embedding)
+            if not np.isclose(norm, 1.0, atol=1e-4):
+                embedding = embedding / (norm + 1e-12)
+            results.append(embedding.astype(np.float32))
+        return results

@@ -69,6 +69,16 @@ class Settings:
     MAX_IMAGE_DIMENSION: int = int(os.getenv("MAX_IMAGE_DIMENSION", "1024"))
     ENABLE_LIVE_VLM_TESTS: bool = os.getenv("ENABLE_LIVE_VLM_TESTS", "false").lower() == "true"
     
+    # Phase 8 Performance optimization settings
+    VLM_MAX_PAGES: int = int(os.getenv("VLM_MAX_PAGES", "2"))
+    VLM_SCORE_GAP_THRESHOLD: float = float(os.getenv("VLM_SCORE_GAP_THRESHOLD", "0.25"))
+    VLM_TEXT_DETAIL: str = os.getenv("VLM_TEXT_DETAIL", "low")
+    VLM_VISUAL_DETAIL: str = os.getenv("VLM_VISUAL_DETAIL", "high")
+    VLM_TEXT_MAX_IMAGES: int = int(os.getenv("VLM_TEXT_MAX_IMAGES", "1"))
+    VLM_VISUAL_MAX_IMAGES: int = int(os.getenv("VLM_VISUAL_MAX_IMAGES", "1"))
+    VLM_CROP_EVIDENCE: bool = os.getenv("VLM_CROP_EVIDENCE", "false").lower() == "true"
+    PDF_RENDER_DPI: int = int(os.getenv("PDF_RENDER_DPI", "150"))
+    
     # Ingestion settings
     MAX_UPLOAD_MB: int = int(os.getenv("MAX_UPLOAD_MB", "20"))
     
@@ -81,15 +91,15 @@ class Settings:
             
         # Validate provider
         prov = self.VLM_PROVIDER.lower().strip()
-        if prov not in ("gemini", "openai"):
-            raise ValueError(f"VLM_PROVIDER must be either 'gemini' or 'openai', got {self.VLM_PROVIDER}")
+        if prov not in ("gemini", "openai", "openrouter", "local"):
+            raise ValueError(f"VLM_PROVIDER must be one of 'gemini', 'openai', 'openrouter', 'local', got {self.VLM_PROVIDER}")
         self.VLM_PROVIDER = prov
         
         # Log key absence warnings
         if self.VLM_PROVIDER == "gemini" and not self.GEMINI_API_KEY:
             logger.warning("VLM_PROVIDER is set to 'gemini' but GEMINI_API_KEY is not configured.")
-        elif self.VLM_PROVIDER == "openai" and not self.OPENAI_API_KEY:
-            logger.warning("VLM_PROVIDER is set to 'openai' but OPENAI_API_KEY is not configured.")
+        elif self.VLM_PROVIDER in ("openai", "openrouter") and not self.OPENAI_API_KEY:
+            logger.warning(f"VLM_PROVIDER is set to '{self.VLM_PROVIDER}' but OPENAI_API_KEY is not configured.")
             
     @property
     def MAX_UPLOAD_SIZE_BYTES(self) -> int:

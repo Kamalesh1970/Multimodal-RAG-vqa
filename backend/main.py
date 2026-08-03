@@ -121,7 +121,8 @@ async def upload_document(file: UploadFile = File(...)):
     """
     try:
         file_bytes = await file.read()
-        result = ingest_document(file_bytes, file.filename)
+        from fastapi.concurrency import run_in_threadpool
+        result = await run_in_threadpool(ingest_document, file_bytes, file.filename)
         return result
     except IngestionError as ie:
         raise HTTPException(status_code=ie.status_code, detail=ie.detail)

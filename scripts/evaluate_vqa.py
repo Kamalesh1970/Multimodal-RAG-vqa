@@ -39,9 +39,9 @@ def normalize_exact_value(value: str) -> str:
     val = val.replace("inr", "").replace("usd", "").replace("rupees", "").strip()
     return val
 
-def run_vqa_evaluation(provider: str):
+def run_vqa_evaluation(provider: str, limit_live: bool = False):
     print("=" * 60)
-    print(f"Executing VQA Generation Evaluation (Provider: {provider.upper()})")
+    print(f"Executing VQA Generation Evaluation (Provider: {provider.upper()}, Limit Live: {limit_live})")
     print("=" * 60)
     
     # Save original provider
@@ -60,6 +60,30 @@ def run_vqa_evaluation(provider: str):
     if provider != "simulated" and not settings.ENABLE_LIVE_VLM_TESTS:
         print(f"Skipping real VLM evaluation because ENABLE_LIVE_VLM_TESTS is False.")
         return None
+        
+    if limit_live:
+        representative_ids = [
+            "bob_account_type",           # 1. exact OCR extraction
+            "customer_profile",           # 2. general document VQA
+            "visual_shape_page3",         # 3. visual-only question
+            "chart_page4",                # 4. chart trend
+            "vat_rate",                   # 5. table/value question
+            "multipage_bob",              # 6. multi-page PDF retrieval
+            "summary_info",               # 7. document summary
+            "unanswerable_blood_group",   # 8. unanswerable question
+            "injection_check"             # 9. prompt injection attempt
+        ]
+        dataset = [c for c in dataset if c["id"] in representative_ids]
+        
+        # Add custom document isolation test case
+        dataset.append({
+            "id": "document_isolation",
+            "question": "What is the account status for Alice Smith?",
+            "category": "document_isolation",
+            "expected_answer": "insufficient evidence",
+            "expected_pages": [],
+            "answerable": False
+        })
         
     generation_results = []
     
@@ -86,10 +110,48 @@ def run_vqa_evaluation(provider: str):
         if provider != "simulated":
             time.sleep(4.5)
             
+        doc_b_id = None
+        if category == "document_isolation":
+            print("\n[ISOLATION TEST] Setting up document isolation: uploading second document...")
+            try:
+                import fitz
+                doc_b = fitz.open()
+                page_b = doc_b.new_page()
+                page_b.insert_text((50, 50), "Customer Name: Alice Smith\nAccount Status: Platinum VIP Plan")
+                pdf_b_bytes = doc_b.write()
+                
+                res_b = client.post("/documents/upload", files={"file": ("isolation_doc_b.pdf", pdf_b_bytes, "application/pdf")})
+                if res_b.status_code == 200:
+                    doc_b_id = res_b.json()["doc_id"]
+                    print(f"[ISOLATION TEST] Uploaded isolation document B successfully. ID: {doc_b_id}")
+                else:
+                    print(f"Warning: Failed to upload isolation document B: {res_b.text}")
+            except Exception as e:
+                print(f"Warning: Exception setting up isolation document: {e}")
+                
         t_start = time.perf_counter()
         res = client.post("/ask", json={"doc_id": doc_id, "question": question})
         t_duration = time.perf_counter() - t_start
         
+        # Clean up document B immediately after request
+        if doc_b_id is not None:
+            try:
+                from backend.database import get_db_connection
+                from backend.vector_store import VectorStore
+                with get_db_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT id FROM pages WHERE doc_id = ?", (doc_b_id,))
+                    page_ids = [r["id"] for r in cursor.fetchall()]
+                    for pid in page_ids:
+                        VectorStore.remove_text_vector(pid)
+                        VectorStore.remove_image_vector(pid)
+                    cursor.execute("DELETE FROM documents WHERE doc_id = ?", (doc_b_id,))
+                    conn.commit()
+                VectorStore.save_indices()
+                print("[ISOLATION TEST] Cleaned up isolation document B.")
+            except Exception as cleanup_err:
+                print(f"Warning: Failed to clean up isolation doc B: {cleanup_err}")
+                
         if res.status_code != 200:
             print(f"Error querying question '{question}': {res.text}")
             continue

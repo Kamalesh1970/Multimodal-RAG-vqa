@@ -48,6 +48,38 @@ def draw_trend_chart(trend: str) -> bytes:
 
 def build_benchmark_document() -> str:
     """Builds and uploads the 10-page benchmark document, returning the doc_id."""
+    # Clean up any previous benchmark documents and their vector index entries to prevent stale/duplicate vectors
+    try:
+        from backend.database import get_db_connection
+        from backend.vector_store import VectorStore
+        from backend.embeddings.text_embedder import TextEmbedder
+        from backend.embeddings.image_embedder import ImageEmbedder
+        
+        # Load indices if not already done
+        text_dim = TextEmbedder.get_dimension()
+        image_dim = ImageEmbedder.get_dimension()
+        VectorStore.initialize(text_dim=text_dim, image_dim=image_dim)
+        
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT doc_id FROM documents WHERE filename = 'benchmark_eval.pdf'")
+            old_docs = [r["doc_id"] for r in cursor.fetchall()]
+            
+            if old_docs:
+                print(f"Cleaning up {len(old_docs)} old benchmark documents from DB and vector indexes...")
+                for old_doc_id in old_docs:
+                    cursor.execute("SELECT id FROM pages WHERE doc_id = ?", (old_doc_id,))
+                    page_ids = [r["id"] for r in cursor.fetchall()]
+                    for pid in page_ids:
+                        VectorStore.remove_text_vector(pid)
+                        VectorStore.remove_image_vector(pid)
+                    cursor.execute("DELETE FROM documents WHERE doc_id = ?", (old_doc_id,))
+                conn.commit()
+                VectorStore.save_indices()
+                print("Stale benchmark documents and vector index entries cleaned successfully.")
+    except Exception as clean_err:
+        print(f"Warning: Failed to clean up old benchmark vectors: {clean_err}")
+
     print("Building synthetic benchmark PDF document...")
     doc = fitz.open()
     

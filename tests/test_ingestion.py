@@ -46,7 +46,7 @@ def mock_perform_ocr():
         yield mock
 
 def test_health_still_works(client):
-    """Verify health and root endpoints return status code 200 and phase 2."""
+    """Verify health and root endpoints return status code 200."""
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "healthy"
@@ -54,7 +54,7 @@ def test_health_still_works(client):
 
     response = client.get("/")
     assert response.status_code == 200
-    assert response.json()["phase"] == 2
+    assert "<!DOCTYPE html>" in response.text or "html" in response.text
 
 def test_unsupported_extension(client):
     """Verify upload endpoint rejects unsupported extensions with HTTP 400."""

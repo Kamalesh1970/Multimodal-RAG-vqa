@@ -30,6 +30,17 @@ def test_db(tmp_path):
     settings.INDEXES_DIR = temp_indexes_dir
     settings.VECTOR_INDEX_DIR = temp_indexes_dir
     
+    # Auto-initialize database tables for test isolation
+    from backend.database import init_db
+    init_db()
+    
+    # Reset VectorStore memory state to guarantee test isolation
+    from backend.vector_store import VectorStore
+    VectorStore._text_index = None
+    VectorStore._image_index = None
+    VectorStore._text_dim = None
+    VectorStore._image_dim = None
+    
     yield temp_db_path
     
     # Restore original settings

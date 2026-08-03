@@ -7,7 +7,10 @@ A Multimodal Retrieval-Augmented Generation (RAG) system built with FastAPI and 
 - **Phase 2 — Document Ingestion & OCR (Completed)**
 - **Phase 3 — Multimodal Embeddings & Vector Storage (Completed)**
 - **Phase 4 — Multimodal Retrieval (Completed)**
-- **Phase 5 — Gemini Multimodal Grounded Answer Generation (Completed)**
+- **Phase 5 — Grounded VLM Answer Generation (Completed)**
+- **Phase 6 — Retrieval Optimization & Evaluation (Completed)**
+- **Phase 7 — Frontend Custom Integration (Completed)**
+- **Phase 8 — Final Integration, Validation & Evaluation (Completed)**
 
 ---
 
@@ -85,7 +88,11 @@ MAX_UPLOAD_MB=20
 
 Start the FastAPI backend server using Uvicorn:
 ```bash
-python -m uvicorn backend.main:app --reload
+# Standard / Development run
+uvicorn backend.main:app --reload --reload-exclude "data/*"
+
+# Production / Performance benchmark run (Highly recommended)
+uvicorn backend.main:app --host 127.0.0.1 --port 8000
 ```
 
 - **API Base URL**: `http://127.0.0.1:8000`
@@ -244,39 +251,39 @@ Open your browser and navigate to:
 
 ## Running Tests
 
-Run the full automated test suite using pytest:
+Run the automated test suite using pytest:
 ```bash
-# Run all tests (including mock and real OCR/embeddings E2E tests)
-pytest -v -s
+# Run all offline unit and integration tests (safely skips remote VLM paid API calls)
+pytest -m "not live_vlm" -v
 
-# Run only fast unit tests (skips slow real PaddleOCR and model inference)
-pytest -m "not ocr"
+# Run only extremely fast unit tests (skips slow local PaddleOCR and visual models loading)
+pytest -m "not ocr and not simulated and not live_vlm" -v
 ```
 
 ---
 
-## Evaluation & Benchmarking (Phase 6)
+## Evaluation & Benchmarking
 
-The RAG system contains offline evaluation and optimization scripts to run retrieval and VQA benchmarks:
+The RAG system contains offline and online evaluation scripts to run unified benchmarks. Use the unified Phase 8 evaluation script:
 
-### 1. Run Retrieval Evaluation (Mode A)
-Executes offline retrieval recall and fusion experiments without requiring paid VLM API credentials:
 ```bash
-python scripts/evaluate_retrieval.py
-```
-This script runs a grid search on text/image weights, min-max score normalization, and Reciprocal Rank Fusion (RRF), saving metrics to [reports/evaluation/retrieval_optimized.json](file:///home/kamalesh/RAG_Project/reports/evaluation/retrieval_optimized.json).
+# Mode 1: Run Retrieval-only benchmark (Mode A)
+python scripts/evaluate_final.py --mode offline
 
-### 2. Run VQA Generation Evaluation (Mode B & C)
-Executes the visual question answering pipeline, scoring exact-value accuracy, unanswerable queries, and prompt injection resistance:
-```bash
-# Mode B: Simulated Local VLM
-python scripts/evaluate_vqa.py --provider simulated
+# Mode 2: Run VQA Generation benchmark with Simulated Local VLM (Mode B)
+python scripts/evaluate_final.py --mode simulated
 
-# Mode C: Real Gemini/OpenAI API (Requires active API keys and ENABLE_LIVE_VLM_TESTS=true)
-python scripts/evaluate_vqa.py --provider gemini
+# Mode 3: Run VQA Generation benchmark against Real Remote VLM (Mode C - requires API Keys)
+python scripts/evaluate_final.py --mode live
 ```
-All results are saved to [reports/evaluation/generation_results.json](file:///home/kamalesh/RAG_Project/reports/evaluation/generation_results.json).
-Detailed analysis is documented in [reports/PHASE6_EVALUATION.md](file:///home/kamalesh/RAG_Project/reports/PHASE6_EVALUATION.md).
+
+### Retrieval Evaluation Details
+The retrieval evaluation executes a grid search on text/image weights, min-max score normalization, and Reciprocal Rank Fusion (RRF), saving metrics to [reports/evaluation/retrieval_optimized.json](file:///home/kamalesh/RAG_Project/reports/evaluation/retrieval_optimized.json).
+
+### VQA Generation Evaluation Details
+The VQA generation evaluations score exact-value accuracy, document context isolation, and prompt injection resistance, saving results to [reports/evaluation/generation_results.json](file:///home/kamalesh/RAG_Project/reports/evaluation/generation_results.json).
+
+Detailed analysis is documented in [reports/PHASE8_FINAL_VALIDATION.md](file:///home/kamalesh/RAG_Project/reports/PHASE8_FINAL_VALIDATION.md).
 
 ---
 

@@ -105,3 +105,27 @@ def test_index_synchronization_validation():
     assert "missing_image_vectors" in sync_report
     assert "stale_text_vectors" in sync_report
     assert "stale_image_vectors" in sync_report
+
+def test_offline_evaluator_regression():
+    """Verify that the unified evaluate_final script runs in offline mode without signature errors."""
+    from scripts.evaluate_final import main
+    import sys
+    from unittest.mock import patch
+    
+    # Mock sys.argv to trigger --mode offline
+    with patch.object(sys, 'argv', ['evaluate_final.py', '--mode', 'offline']):
+        # Mock run_evaluation inside evaluate_retrieval to avoid running the full grid search
+        # during unit test runs, but verify that it is called with correct arguments
+        with patch('scripts.evaluate_final.run_retrieval_eval', return_value={
+            "Recall@1": 1.0, "Recall@3": 1.0, "Recall@5": 1.0, "MRR": 1.0,
+            "latencies": [0.012], "failures": [], "category_metrics": {}
+        }) as mock_eval:
+            # We patch the locally imported helper functions at their source module
+            with patch('scripts.evaluate_retrieval.build_benchmark_document', return_value="dummy-doc-id"):
+                with patch('scripts.evaluate_retrieval.load_benchmark_dataset', return_value=[]):
+                    main()
+                    mock_eval.assert_called_once()
+                    # Verify that doc_id and dataset are passed correctly as arguments!
+                    args, kwargs = mock_eval.call_args
+                    assert args[0] == "dummy-doc-id"
+                    assert isinstance(args[1], list)

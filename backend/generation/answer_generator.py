@@ -33,19 +33,48 @@ class GeminiAnswerResponse(BaseModel):
 # Grounding and Intent Utilities
 # =====================================================================
 
-def optimize_image(img: Image.Image) -> Image.Image:
+from backend.generation.image_preprocessor import prepare_vlm_image, crop_evidence_region
+
+def classify_question_intent(question: str) -> str:
     """
-    Resizes layout screenshots to keep max dimension under settings.MAX_IMAGE_DIMENSION
-    while preserving aspect ratio and ensuring readability for VLM.
+    Classifies question into 'VISUAL' or 'TEXT' using deterministic heuristics.
     """
-    max_dim = settings.MAX_IMAGE_DIMENSION
-    w, h = img.size
-    if max(w, h) > max_dim:
-        scale = max_dim / max(w, h)
-        new_w = int(w * scale)
-        new_h = int(h * scale)
-        img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-    return img
+    visual_keywords = {
+        "color", "shape", "chart", "graph", "diagram", "image", "drawing", "plot", 
+        "trend", "circle", "square", "rectangle", "ellipse", "blue", "red", "yellow", 
+        "green", "black", "white", "line", "drawn", "visual", "look like", "logo", "icon"
+    }
+    words = [w.strip("?,.:;!\"'").lower() for w in question.split()]
+    if any(w in visual_keywords for w in words):
+        return "VISUAL"
+    return "TEXT"
+
+def select_pages_for_vlm(retrieval_results: list[dict], question: str) -> list[dict]:
+    if not retrieval_results:
+        return []
+        
+    summary_keywords = {"summarise", "summarize", "summary", "overview", "compare", "comparison", "both", "all", "entire", "whole", "between", "and", "contact", "signee", "robert"}
+    q_lower = question.lower()
+    is_multipage = any(kw in q_lower for kw in summary_keywords)
+    
+    max_pages = getattr(settings, "VLM_MAX_PAGES", 2)
+    
+    if is_multipage:
+        return retrieval_results[:max_pages]
+        
+    if len(retrieval_results) == 1:
+        return retrieval_results
+        
+    score1 = retrieval_results[0]["scores"]["fused"]
+    score2 = retrieval_results[1]["scores"]["fused"]
+    gap = score1 - score2
+    
+    gap_threshold = getattr(settings, "VLM_SCORE_GAP_THRESHOLD", 0.15)
+    
+    if gap >= gap_threshold:
+        return retrieval_results[:1]
+    else:
+        return retrieval_results[:min(2, max_pages)]
 
 def adjust_top_k_for_intent(question: str, doc_page_count: int, top_k: int | None) -> int:
     """
@@ -142,7 +171,10 @@ def generate_grounded_answer(doc_id: str, question: str, top_k: int | None = Non
         
     # 2. Adjust top_k and retrieve evidence
     adjusted_k = adjust_top_k_for_intent(question, page_count, top_k)
-    retrieval_results = retrieve_evidence(doc_id, question, top_k=adjusted_k)
+    all_retrieved = retrieve_evidence(doc_id, question, top_k=adjusted_k)
+    
+    # Apply adaptive page selection to restrict context size
+    retrieval_results = select_pages_for_vlm(all_retrieved, question)
     
     if not retrieval_results:
         return {
@@ -158,6 +190,28 @@ def generate_grounded_answer(doc_id: str, question: str, top_k: int | None = Non
             }
         }
         
+    # Classify query intent and determine details/crop limits
+    intent = classify_question_intent(question)
+    if intent == "VISUAL":
+        max_images = getattr(settings, "VLM_VISUAL_MAX_IMAGES", 1)
+        detail_mode = getattr(settings, "VLM_VISUAL_DETAIL", "high")
+    else:
+        max_images = getattr(settings, "VLM_TEXT_MAX_IMAGES", 1)
+        detail_mode = getattr(settings, "VLM_TEXT_DETAIL", "low")
+        
+    # Pre-load OCR block coordinates for potential crop operation
+    retrieval_blocks = {}
+    if intent == "TEXT" and getattr(settings, "VLM_CROP_EVIDENCE", False):
+        try:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT page_number, ocr_blocks_json FROM pages WHERE doc_id = ?", (doc_id,))
+                for r in cursor.fetchall():
+                    blocks = json.loads(r["ocr_blocks_json"]) if r["ocr_blocks_json"] else []
+                    retrieval_blocks[r["page_number"]] = blocks
+        except Exception as e:
+            logger.error(f"Failed to fetch page block coordinates for cropping: {e}")
+        
     # 3. Compile prompt text and Base64 images dictionary within budgets
     top_score = retrieval_results[0]["scores"]["fused"] if retrieval_results else 0.0
     pages_considered = [r["page_number"] for r in retrieval_results]
@@ -170,7 +224,7 @@ def generate_grounded_answer(doc_id: str, question: str, top_k: int | None = Non
             retrieval_results=retrieval_results,
             response_schema=GeminiAnswerResponse
         )
-    elif settings.VLM_PROVIDER == "openai":
+    elif settings.VLM_PROVIDER in ("openai", "openrouter"):
         # Compile prompt text with MAX_OCR_CONTEXT_CHARS budget limit
         prompt_text = (
             f"DOCUMENT ID: {doc_id}\n"
@@ -200,12 +254,28 @@ def generate_grounded_answer(doc_id: str, question: str, top_k: int | None = Non
             prompt_text += page_context
             
             # Conditionally attach images under max images limit
-            if images_attached < settings.MAX_VLM_IMAGES:
+            if images_attached < max_images:
                 image_path = settings.PROCESSED_DIR / doc_id / f"page_{page_num}.jpg"
                 if image_path.exists():
                     try:
                         img = Image.open(image_path)
-                        img = optimize_image(img)
+                        
+                        # Apply layout cropping around matched lines if enabled
+                        bboxes = []
+                        if intent == "TEXT" and getattr(settings, "VLM_CROP_EVIDENCE", False):
+                            page_blocks = retrieval_blocks.get(page_num, [])
+                            for line in result["evidence_text"]:
+                                line_lower = line.lower().strip()
+                                for b in page_blocks:
+                                    text_lower = b.get("text", "").lower().strip()
+                                    if line_lower in text_lower or text_lower in line_lower:
+                                        if b.get("bbox"):
+                                            bboxes.append(b["bbox"])
+                                            
+                        if bboxes:
+                            img = crop_evidence_region(img, bboxes)
+                            
+                        img = prepare_vlm_image(img, settings.MAX_IMAGE_DIMENSION)
                         images_dict[page_num] = img
                         images_attached += 1
                     except Exception as e:
@@ -218,11 +288,12 @@ def generate_grounded_answer(doc_id: str, question: str, top_k: int | None = Non
             "Remember, do not answer from outside knowledge if evidence is missing."
         )
         
-        # Invoke OpenAI API
+        # Invoke OpenAI / OpenRouter API passing details mode
         response_text = generate_openai_content_with_retry(
             prompt_text=prompt_text,
             images_dict=images_dict,
-            response_schema=GeminiAnswerResponse
+            response_schema=GeminiAnswerResponse,
+            detail=detail_mode
         )
     else:
         # Compile Gemini multimodal prompt list
@@ -255,12 +326,28 @@ def generate_grounded_answer(doc_id: str, question: str, top_k: int | None = Non
             prompt_char_count += len(page_context)
             
             # Conditionally attach images under max images limit
-            if images_attached < settings.MAX_VLM_IMAGES:
+            if images_attached < max_images:
                 image_path = settings.PROCESSED_DIR / doc_id / f"page_{page_num}.jpg"
                 if image_path.exists():
                     try:
                         img = Image.open(image_path)
-                        img = optimize_image(img)
+                        
+                        # Apply layout cropping around matched lines if enabled
+                        bboxes = []
+                        if intent == "TEXT" and getattr(settings, "VLM_CROP_EVIDENCE", False):
+                            page_blocks = retrieval_blocks.get(page_num, [])
+                            for line in result["evidence_text"]:
+                                line_lower = line.lower().strip()
+                                for b in page_blocks:
+                                    text_lower = b.get("text", "").lower().strip()
+                                    if line_lower in text_lower or text_lower in line_lower:
+                                        if b.get("bbox"):
+                                            bboxes.append(b["bbox"])
+                                            
+                        if bboxes:
+                            img = crop_evidence_region(img, bboxes)
+                            
+                        img = prepare_vlm_image(img, settings.MAX_IMAGE_DIMENSION)
                         contents.append(f"[Page {page_num} Layout Image]")
                         contents.append(img)
                         images_attached += 1
