@@ -6,6 +6,7 @@ __pycache__/
 .DS_Store
 *.db
 .venv
+.env.example
 # Ignore generated/uploaded/indexed data but keep directories via gitkeep
 data/uploads/*
 !data/uploads/.gitkeep
