@@ -1,6 +1,9 @@
 import os
+import logging
 from pathlib import Path
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 # Project root directory
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -34,8 +37,30 @@ class Settings:
     IMAGE_RETRIEVAL_WEIGHT: float = float(os.getenv("IMAGE_RETRIEVAL_WEIGHT", "0.35"))
     RETRIEVAL_MIN_SCORE: float = float(os.getenv("RETRIEVAL_MIN_SCORE", "0.0"))
     
-    # Gemini API Key placeholder for future phases
+    # Phase 5 VLM Backend configuration
+    VLM_PROVIDER: str = os.getenv("VLM_PROVIDER", "gemini") # 'gemini' or 'openai'
+    
+    # Gemini API configurations
     GEMINI_API_KEY: str | None = os.getenv("GEMINI_API_KEY")
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+    GEMINI_TIMEOUT: float = float(os.getenv("GEMINI_TIMEOUT", "30.0"))
+    GEMINI_MAX_RETRIES: int = int(os.getenv("GEMINI_MAX_RETRIES", "2"))
+    
+    # OpenAI / OpenRouter API configurations
+    OPENAI_API_KEY: str | None = os.getenv("OPENAI_API_KEY")
+    OPENAI_BASE_URL: str | None = os.getenv("OPENAI_BASE_URL")
+    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    OPENAI_TIMEOUT: float = float(os.getenv("OPENAI_TIMEOUT", "30.0"))
+    OPENAI_MAX_RETRIES: int = int(os.getenv("OPENAI_MAX_RETRIES", "2"))
+    
+    # Phase 5 VLM cost & token budget configurations
+    GENERATION_TOP_K: int = int(os.getenv("GENERATION_TOP_K", "2"))
+    VLM_MAX_OUTPUT_TOKENS: int = int(os.getenv("VLM_MAX_OUTPUT_TOKENS", "512"))
+    MAX_OCR_CONTEXT_CHARS: int = int(os.getenv("MAX_OCR_CONTEXT_CHARS", "4000"))
+    MAX_VLM_IMAGES: int = int(os.getenv("MAX_VLM_IMAGES", "2"))
+    MAX_VLM_CALLS_PER_REQUEST: int = int(os.getenv("MAX_VLM_CALLS_PER_REQUEST", "1"))
+    MAX_IMAGE_DIMENSION: int = int(os.getenv("MAX_IMAGE_DIMENSION", "1024"))
+    ENABLE_LIVE_VLM_TESTS: bool = os.getenv("ENABLE_LIVE_VLM_TESTS", "false").lower() == "true"
     
     # Ingestion settings
     MAX_UPLOAD_MB: int = int(os.getenv("MAX_UPLOAD_MB", "20"))
@@ -46,6 +71,18 @@ class Settings:
             raise ValueError(f"TEXT_RETRIEVAL_WEIGHT must be between 0.0 and 1.0, got {self.TEXT_RETRIEVAL_WEIGHT}")
         if not (0.0 <= self.IMAGE_RETRIEVAL_WEIGHT <= 1.0):
             raise ValueError(f"IMAGE_RETRIEVAL_WEIGHT must be between 0.0 and 1.0, got {self.IMAGE_RETRIEVAL_WEIGHT}")
+            
+        # Validate provider
+        prov = self.VLM_PROVIDER.lower().strip()
+        if prov not in ("gemini", "openai"):
+            raise ValueError(f"VLM_PROVIDER must be either 'gemini' or 'openai', got {self.VLM_PROVIDER}")
+        self.VLM_PROVIDER = prov
+        
+        # Log key absence warnings
+        if self.VLM_PROVIDER == "gemini" and not self.GEMINI_API_KEY:
+            logger.warning("VLM_PROVIDER is set to 'gemini' but GEMINI_API_KEY is not configured.")
+        elif self.VLM_PROVIDER == "openai" and not self.OPENAI_API_KEY:
+            logger.warning("VLM_PROVIDER is set to 'openai' but OPENAI_API_KEY is not configured.")
             
     @property
     def MAX_UPLOAD_SIZE_BYTES(self) -> int:

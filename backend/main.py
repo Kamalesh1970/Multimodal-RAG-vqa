@@ -306,3 +306,61 @@ def retrieve_grounded_evidence(request: RetrieveRequest):
         logger.error(f"Error during retrieval execution: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error during retrieval.")
 
+class AskRequest(BaseModel):
+    doc_id: str
+    question: str
+    top_k: int | None = None
+
+@app.post("/ask")
+def ask_grounded_question(request: AskRequest):
+    """
+    Multimodal Question Answering endpoint. Retrieves matched page context and layout images
+    and calls Google Gemini API to generate a grounded answer.
+    """
+    from backend.generation.answer_generator import generate_grounded_answer
+    from backend.retrieval import DocumentNotFoundError, IncompleteDocumentError
+    try:
+        response = generate_grounded_answer(
+            doc_id=request.doc_id,
+            question=request.question,
+            top_k=request.top_k
+        )
+        return {
+            "doc_id": request.doc_id,
+            "question": request.question,
+            **response
+        }
+    except DocumentNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except IncompleteDocumentError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except ValueError as e:
+        if "GEMINI_API_KEY" in str(e) or "OPENAI_API_KEY" in str(e):
+            raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        # Catch specific Gemini API errors and map them to appropriate gateway/service error codes
+        try:
+            from google.genai.errors import APIError
+            if isinstance(e, APIError):
+                logger.error(f"Gemini API error occurred: {e.message} (code: {e.code})")
+                status_code = 503 if e.code == 429 else 502
+                raise HTTPException(status_code=status_code, detail=f"Gemini API error: {e.message}")
+        except ImportError:
+            pass
+            
+        # Catch specific OpenAI API errors and map them to appropriate gateway/service error codes
+        try:
+            from openai import OpenAIError
+            if isinstance(e, OpenAIError):
+                status_code = getattr(e, "status_code", None)
+                message = getattr(e, "message", str(e))
+                logger.error(f"OpenAI API error occurred: {message} (code: {status_code})")
+                mapped_status = 503 if status_code == 429 else 502
+                raise HTTPException(status_code=mapped_status, detail=f"OpenAI API error: {message}")
+        except ImportError:
+            pass
+            
+        logger.error(f"Error during answer generation: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error during answer generation.")
+

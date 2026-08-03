@@ -46,3 +46,14 @@ def client():
     """
     with TestClient(app) as client:
         yield client
+
+@pytest.fixture(autouse=True)
+def force_local_vlm():
+    """
+    Forces VLM_PROVIDER to 'local' for all tests unless FORCE_LIVE_API is set to true.
+    """
+    import os
+    if os.getenv("FORCE_LIVE_API", "false").lower() == "true":
+        pass
+    else:
+        settings.VLM_PROVIDER = "local"

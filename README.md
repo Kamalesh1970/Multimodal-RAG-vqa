@@ -7,6 +7,7 @@ A Multimodal Retrieval-Augmented Generation (RAG) system built with FastAPI and 
 - **Phase 2 — Document Ingestion & OCR (Completed)**
 - **Phase 3 — Multimodal Embeddings & Vector Storage (Completed)**
 - **Phase 4 — Multimodal Retrieval (Completed)**
+- **Phase 5 — Gemini Multimodal Grounded Answer Generation (Completed)**
 
 ---
 
@@ -31,6 +32,14 @@ A Multimodal Retrieval-Augmented Generation (RAG) system built with FastAPI and 
 - **Weighted Available Modalities (WAM)**: Dynamically adjusts score weighting when a specific modality is missing (e.g. blank page with no OCR text) to avoid penalizing visual-only pages.
 - **Lexical Evidence Selection**: Normalizes query terms to identify and extract the top 3 most relevant localized text blocks from raw OCR structures.
 - **Deterministic Tie-Breaking**: Ranks candidates based on fused score descending, then page number ascending, and finally page ID ascending to guarantee stable result lists.
+
+## Features (Phase 5 Gemini Multimodal Grounded Answer Generation)
+- **Lazy client connection**: Initialized on first call using Google GenAI SDK (`google-genai`), preventing boot crashes if configuration is absent.
+- **Grounded multimodal prompt**: Feeds both OCR textual evidence and corresponding PIL page layout images to Gemini (e.g., `gemini-2.5-flash`), leveraging both visual contexts (slopes, shapes, charts) and textual parameters.
+- **Query intent adapter**: Dynamically adjusts retrieval `top_k` depending on query semantics (e.g., retrieving up to 10 context pages for broad summaries, or 3 pages for factual queries).
+- **Post-generation grounding checker**: Compares generated text against source OCR coordinates to evaluate source authenticity and classifies grounding mode (`text-supported`, `visual-supported`, or `multimodal-supported`).
+- **Prompt injection defense**: Includes explicit system prompt directives classifying document contents as raw DATA blocks only, preventing malicious OCR injection instructions from hijacking LLM reasoning.
+- **No-answer rejection**: Enforces clean unanswerable responses (setting `answerable=False`) when context contains insufficient factual data, completely mitigating model hallucinations.
 
 ---
 
@@ -173,6 +182,41 @@ python -m uvicorn backend.main:app --reload
     }
     ```
 
+### 8. Multimodal Question Answering (VQA)
+* **POST** `/ask`
+  * Submits query question to retrieve relevant pages, passes visual layouts and OCR text to Gemini, and returns a fully grounded, cited answer.
+  * Request Format:
+    ```json
+    {
+      "doc_id": "550e8400-e29b-41d4-a716-446655440000",
+      "question": "What plan does Alice Johnson subscribe to?",
+      "top_k": 3
+    }
+    ```
+  * Response Format:
+    ```json
+    {
+      "doc_id": "550e8400-e29b-41d4-a716-446655440000",
+      "question": "What plan does Alice Johnson subscribe to?",
+      "answer": "Premium Package",
+      "answerable": true,
+      "grounding_explanation": "Alice Johnson's subscription details are visible on Page 2.",
+      "pages_used": [2],
+      "grounding_type": "text-supported",
+      "evidence": [
+        {
+          "page_number": 2,
+          "text": "Plan Subscription: Premium Package",
+          "bbox": [[20.0, 50.0], [300.0, 50.0], [300.0, 70.0], [20.0, 70.0]]
+        }
+      ],
+      "retrieval": {
+        "top_score": 0.8245,
+        "pages_considered": [1, 2, 3]
+      }
+    }
+    ```
+
 ---
 
 ## Running Tests
@@ -202,6 +246,10 @@ Multimodal-RAG-vqa/
 │   │   ├── __init__.py
 │   │   ├── text_embedder.py  # SentenceTransformers L2 normalized text embeddings
 │   │   └── image_embedder.py # OpenCLIP visual layout & query text embeddings
+│   ├── generation/
+│   │   ├── __init__.py
+│   │   ├── gemini_client.py  # Lazy API client config and retries
+│   │   └── answer_generator.py # Multimodal context formatting, WAM, and post-grounding check
 │   └── ingestion/
 │       ├── __init__.py
 │       ├── ocr.py        # PaddleOCR engine singleton & normalizers
@@ -215,7 +263,8 @@ Multimodal-RAG-vqa/
 │   ├── test_health.py
 │   ├── test_ingestion.py # Ingestion flow and error handling E2E tests
 │   ├── test_embeddings.py # Embedding unit, sanity, and persistence tests
-│   └── test_retrieval.py # Query retrieval validation and performance metrics comparison
+│   ├── test_retrieval.py # Query retrieval validation and performance metrics comparison
+│   └── test_generation.py # Grounded VQA answer generation unit, visual, and prompt-injection tests
 ├── reports/
 │   └── PROJECT_PROGRESS.md
 ├── .env.example
@@ -232,7 +281,7 @@ Multimodal-RAG-vqa/
 - [x] **Phase 2 — Ingestion & OCR**: PDF rendering, image orientation correction, PaddleOCR integration, metadata persistence, and upload endpoints.
 - [x] **Phase 3 — Embeddings & Vector Storage**: Page-level visual and text embedding generation using OpenCLIP/SentenceTransformers and FAISS indexing.
 - [x] **Phase 4 — Multimodal Retrieval**: Exact search, document-isolation filtering, min-max score calibration, and WAM score fusion.
-- [ ] **Phase 5 — Gemini VLM**: VLM inference logic using Gemini API.
+- [x] **Phase 5 — Gemini Multimodal Grounded Answer Generation**: Structured VQA answers extraction, prompt-injection defense, no-answer checks, and citation metadata.
 - [ ] **Phase 6 — Accuracy & Grounding**: Reranking and confidence estimation.
 - [ ] **Phase 7 — Custom Frontend**: React/Streamlit interface.
 - [ ] **Phase 8 — Evaluation**: Systematic testing of retrieval accuracy and answer quality.
