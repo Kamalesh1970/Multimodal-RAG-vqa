@@ -19,6 +19,6 @@ faiss-cpu>=1.8.0
 google-genai>=0.1.1
 openai>=1.0.0
 firebase-admin>=6.5.0
-python-3.12.3
+
 
 
