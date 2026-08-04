@@ -1,8 +1,8 @@
 /**
- * Main application controller managing UI state, event handling,
- * and relative path API communication.
+ * Main application controller managing UI state, Firebase authentication,
+ * document selector dashboard, and API communication.
  */
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     // --- Application State ---
     let activeDocId = null;
     let pageCount = 0;
@@ -16,11 +16,41 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- DOM Elements ---
     // Header
     const connectionBadge = document.getElementById('connection-badge');
+    const userDisplay = document.getElementById('user-display');
+    const logoutBtn = document.getElementById('logout-btn');
+    
+    // Auth Panel
+    const authLoading = document.getElementById('auth-loading');
+    const authContainer = document.getElementById('auth-container');
+    const authCard = document.querySelector('.auth-card');
+    const authTitle = document.getElementById('auth-title');
+    const authSubtitle = document.getElementById('auth-subtitle');
+    const authForm = document.getElementById('auth-form');
+    const authEmail = document.getElementById('auth-email');
+    const authPassword = document.getElementById('auth-password');
+    const authName = document.getElementById('auth-name');
+    const authConfirmPassword = document.getElementById('auth-confirm-password');
+    const nameGroup = document.getElementById('name-group');
+    const confirmPasswordGroup = document.getElementById('confirm-password-group');
+    const authSubmitBtn = document.getElementById('auth-submit-btn');
+    const authSwitchLink = document.getElementById('auth-switch-link');
+    const switchText = document.getElementById('switch-text');
+    const authError = document.getElementById('auth-error');
+
+    // Layout
+    const appLayout = document.querySelector('.app-layout');
+    const appHeader = document.querySelector('.app-header');
+    const appFooter = document.querySelector('.app-footer-bar');
     
     // Panel Headers & Warnings
     const newDocBtn = document.getElementById('new-doc-btn');
     const simulatedWarning = document.getElementById('simulated-warning');
     
+    // Document Selector Dashboard
+    const docSelectorContainer = document.getElementById('doc-selector-container');
+    const docSelect = document.getElementById('doc-select');
+    const deleteDocBtn = document.getElementById('delete-doc-btn');
+
     // Upload & Ingestion
     const dropzone = document.getElementById('dropzone');
     const fileInput = document.getElementById('file-input');
@@ -52,11 +82,239 @@ document.addEventListener('DOMContentLoaded', () => {
     const questionInput = document.getElementById('question-input');
     const sendBtn = document.getElementById('send-btn');
 
-    // --- Helper Functions ---
+    // --- Firebase Client SDK Initialization ---
+    let authMode = 'login'; // 'login' or 'register'
 
-    /**
-     * Escape string content safely for HTML interpolation.
-     */
+    try {
+        const config = await API.getFirebaseConfig();
+        // Bypassing login card overlay and loading the main dashboard directly in single-user mode.
+        API.setToken(null);
+        
+        userDisplay.textContent = config.firebase_enabled !== false ? "Firebase Online Mode" : "Local SQLite Mode";
+        userDisplay.style.display = 'inline-block';
+        logoutBtn.style.display = 'none'; // Hide logout button in single-user mode
+        
+        if (authLoading) authLoading.style.display = 'none';
+        authContainer.style.display = 'none';
+        appLayout.style.display = 'flex';
+        appHeader.style.display = 'flex';
+        appFooter.style.display = 'block';
+        
+        checkSystemConnection();
+        await loadUserDocuments();
+    } catch (err) {
+        showGlobalError("Failed to initialize system interface.");
+        if (authLoading) authLoading.style.display = 'none';
+    }
+
+    function setupAuthObserver() {
+        firebase.auth().onIdTokenChanged(async (user) => {
+            if (user) {
+                // User logged in / token refreshed
+                try {
+                    const token = await user.getIdToken();
+                    API.setToken(token);
+                    
+                    userDisplay.textContent = `Welcome, ${user.displayName || user.email}`;
+                    userDisplay.style.display = 'inline-block';
+                    logoutBtn.style.display = 'inline-block';
+                    
+                    if (authLoading) authLoading.style.display = 'none';
+                    authContainer.style.display = 'none';
+                    appLayout.style.display = 'flex';
+                    appHeader.style.display = 'flex';
+                    appFooter.style.display = 'block';
+                    
+                    // Trigger connection checks
+                    checkSystemConnection();
+                    
+                    // Load user document library
+                    await loadUserDocuments();
+                } catch (err) {
+                    console.error("Token acquisition failed:", err);
+                }
+            } else {
+                // User logged out
+                API.setToken(null);
+                userDisplay.style.display = 'none';
+                logoutBtn.style.display = 'none';
+                appLayout.style.display = 'none';
+                appHeader.style.display = 'none';
+                appFooter.style.display = 'none';
+                if (authLoading) authLoading.style.display = 'none';
+                authContainer.style.display = 'flex';
+                resetSession();
+            }
+        });
+    }
+
+    // --- Authentication UI Handlers ---
+    authSwitchLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        authError.style.display = 'none';
+        
+        if (authMode === 'login') {
+            authMode = 'register';
+            authTitle.textContent = 'Register';
+            authSubtitle.textContent = 'Create a secure account to analyze your documents.';
+            nameGroup.style.display = 'flex';
+            confirmPasswordGroup.style.display = 'flex';
+            authSubmitBtn.textContent = 'Register';
+            switchText.textContent = 'Already have an account?';
+            authSwitchLink.textContent = 'Sign In';
+            authConfirmPassword.required = true;
+        } else {
+            authMode = 'login';
+            authTitle.textContent = 'Sign In';
+            authSubtitle.textContent = 'Enter your email and password to access the app.';
+            nameGroup.style.display = 'none';
+            confirmPasswordGroup.style.display = 'none';
+            authSubmitBtn.textContent = 'Sign In';
+            switchText.textContent = "Don't have an account?";
+            authSwitchLink.textContent = 'Register';
+            authConfirmPassword.required = false;
+        }
+    });
+
+    authForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        authError.style.display = 'none';
+        
+        const email = authEmail.value.trim();
+        const password = authPassword.value;
+        
+        if (authMode === 'register') {
+            const name = authName.value.trim();
+            const confirmPass = authConfirmPassword.value;
+            
+            if (password !== confirmPass) {
+                authError.textContent = "Passwords do not match.";
+                authError.style.display = 'block';
+                return;
+            }
+            
+            authSubmitBtn.disabled = true;
+            authSubmitBtn.textContent = 'Registering...';
+            try {
+                const creds = await firebase.auth().createUserWithEmailAndPassword(email, password);
+                if (name) {
+                    await creds.user.updateProfile({ displayName: name });
+                }
+                
+                // Get token and sync user profile to database
+                const token = await creds.user.getIdToken();
+                API.setToken(token);
+                await API.syncUserProfile(name || email);
+                
+                authSubmitBtn.disabled = false;
+                authSubmitBtn.textContent = 'Register';
+            } catch (err) {
+                authError.textContent = err.message;
+                authError.style.display = 'block';
+                authSubmitBtn.disabled = false;
+                authSubmitBtn.textContent = 'Register';
+            }
+        } else {
+            authSubmitBtn.disabled = true;
+            authSubmitBtn.textContent = 'Signing In...';
+            try {
+                await firebase.auth().signInWithEmailAndPassword(email, password);
+                authSubmitBtn.disabled = false;
+                authSubmitBtn.textContent = 'Sign In';
+            } catch (err) {
+                authError.textContent = err.message;
+                authError.style.display = 'block';
+                authSubmitBtn.disabled = false;
+                authSubmitBtn.textContent = 'Sign In';
+            }
+        }
+    });
+
+    logoutBtn.addEventListener('click', async () => {
+        try {
+            await firebase.auth().signOut();
+        } catch (err) {
+            console.error('Logout failed:', err);
+        }
+    });
+
+    // --- Document Selector Dashboard Logic ---
+    async function loadUserDocuments(selectDocId = null) {
+        try {
+            const documents = await API.listDocuments();
+            
+            docSelect.innerHTML = '';
+            
+            if (documents.length === 0) {
+                docSelectorContainer.style.display = 'none';
+                resetSession();
+                return;
+            }
+            
+            documents.forEach(doc => {
+                const opt = document.createElement('option');
+                opt.value = doc.doc_id;
+                opt.textContent = `${doc.filename} (${doc.status})`;
+                docSelect.appendChild(opt);
+            });
+            
+            docSelectorContainer.style.display = 'flex';
+            
+            const targetId = selectDocId || documents[0].doc_id;
+            docSelect.value = targetId;
+            
+            await selectActiveDocument(targetId);
+        } catch (err) {
+            console.error('Failed to load user documents:', err);
+            showGlobalError('Failed to load document list.');
+        }
+    }
+
+    async function selectActiveDocument(docId) {
+        try {
+            activeDocId = docId;
+            const docInfo = await API.getDocumentMetadata(docId);
+            renderDocumentDetails(docInfo);
+            
+            if (docInfo.status === 'completed') {
+                questionInput.disabled = false;
+                questionInput.placeholder = "Ask a question about this document...";
+                sendBtn.disabled = false;
+                newDocBtn.style.display = 'inline-block';
+                
+                // Clear chat panel on switch
+                conversationContainer.innerHTML = '';
+                conversationContainer.style.display = 'none';
+                emptyQaState.style.display = 'flex';
+            } else {
+                questionInput.disabled = true;
+                questionInput.placeholder = `Document status is: ${docInfo.status}...`;
+                sendBtn.disabled = true;
+                newDocBtn.style.display = 'none';
+            }
+        } catch (err) {
+            console.error('Failed to select active document:', err);
+        }
+    }
+
+    docSelect.addEventListener('change', (e) => {
+        selectActiveDocument(e.target.value);
+    });
+
+    deleteDocBtn.addEventListener('click', async () => {
+        if (!activeDocId) return;
+        if (!confirm('Are you sure you want to delete this document and all its data permanently?')) return;
+        
+        try {
+            await API.deleteDocument(activeDocId);
+            showGlobalError('Document deleted successfully.');
+            await loadUserDocuments();
+        } catch (err) {
+            showGlobalError('Failed to delete document: ' + err.message);
+        }
+    });
+
+    // --- Helper Functions ---
     function escapeHtml(str) {
         if (!str) return '';
         return str
@@ -67,16 +325,22 @@ document.addEventListener('DOMContentLoaded', () => {
             .replace(/'/g, '&#39;');
     }
 
-    /**
-     * Updates the connection badge status.
-     */
     async function checkSystemConnection() {
+        let firebaseEnabled = false;
+        try {
+            const config = await API.getFirebaseConfig();
+            firebaseEnabled = config.firebase_enabled !== false;
+        } catch (_) {}
+        
+        if (firebaseEnabled && (!window.firebase || !firebase.auth || !firebase.auth().currentUser)) {
+            return;
+        }
+        
         try {
             const data = await API.checkHealth();
             isConnected = true;
             connectionBadge.className = 'badge badge-connected';
             
-            // Map generation mode
             const modeLabel = data.generation_mode === 'simulated' ? 'Simulated' : 'Live';
             connectionBadge.textContent = `Connected (${modeLabel})`;
             
@@ -94,11 +358,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    /**
-     * Displays a global error message box.
-     */
     function showGlobalError(msg) {
-        // Find or create global toast
         let toast = document.getElementById('error-toast');
         if (!toast) {
             toast = document.createElement('div');
@@ -125,8 +385,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Drag and Drop Logic ---
-
-    // Prevent default drag behaviors
     ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
         dropzone.addEventListener(eventName, preventDefaults, false);
     });
@@ -136,7 +394,6 @@ document.addEventListener('DOMContentLoaded', () => {
         e.stopPropagation();
     }
 
-    // Highlight drop zone when dragging over
     ['dragenter', 'dragover'].forEach(eventName => {
         dropzone.addEventListener(eventName, () => {
             dropzone.classList.add('dropzone-dragover');
@@ -149,7 +406,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }, false);
     });
 
-    // Handle dropped files
     dropzone.addEventListener('drop', (e) => {
         const dt = e.dataTransfer;
         const files = dt.files;
@@ -158,7 +414,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Handle click browser upload
     browseBtn.addEventListener('click', () => {
         fileInput.click();
     });
@@ -169,13 +424,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    /**
-     * Validates and prepares file upload.
-     */
     function handleFileSelection(file) {
         if (isUploading) return;
         
-        // 1. Validation
         const ext = '.' + file.name.split('.').pop().toLowerCase();
         const supported = ['.pdf', '.png', '.jpg', '.jpeg'];
         
@@ -184,7 +435,6 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // 20MB limit
         if (file.size > 20 * 1024 * 1024) {
             showGlobalError("File is too large. Maximum size is 20MB.");
             return;
@@ -193,15 +443,11 @@ document.addEventListener('DOMContentLoaded', () => {
         uploadFile(file);
     }
 
-    /**
-     * Executes upload and updates state steps.
-     */
     async function uploadFile(file) {
         isUploading = true;
         dropzone.style.display = 'none';
         processingContainer.style.display = 'flex';
         
-        // Rotate status messages to represent actual pipeline steps
         const stages = [
             "Uploading document...",
             "Processing page layouts...",
@@ -223,21 +469,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const uploadResult = await API.uploadDocument(file);
             activeDocId = uploadResult.doc_id;
 
-            // Fetch document metadata details
-            const docInfo = await API.getDocumentMetadata(activeDocId);
-            
             clearInterval(processingInterval);
             processingContainer.style.display = 'none';
             
-            // Render active document panel
-            renderDocumentDetails(docInfo);
-            
-            // Unlock Q&A controls
-            questionInput.disabled = false;
-            questionInput.placeholder = "Ask a question about this document...";
-            sendBtn.disabled = false;
-            newDocBtn.style.display = 'inline-block';
-            questionInput.focus();
+            // Reload user documents to sync dashboard selector and display details
+            await loadUserDocuments(activeDocId);
             
             isUploading = false;
         } catch (err) {
@@ -256,9 +492,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    /**
-     * Renders loaded document details and image preview.
-     */
     function renderDocumentDetails(docInfo) {
         metaFilename.textContent = docInfo.filename;
         metaFilename.title = docInfo.filename;
@@ -276,21 +509,15 @@ document.addEventListener('DOMContentLoaded', () => {
             metaPagesRow.style.display = 'none';
         }
 
-        // Show metadata container
         docActiveView.style.display = 'flex';
-
-        // Render preview image
+        dropzone.style.display = 'none';
         updatePreview();
     }
 
-    /**
-     * Renders the current page preview.
-     */
     function updatePreview() {
         previewViewport.innerHTML = '';
         
         if (pageCount > 1) {
-            // PDF: multiple pages preview
             previewPager.style.display = 'flex';
             currentPageNum.textContent = currentPage;
             totalPagesNum.textContent = pageCount;
@@ -301,22 +528,35 @@ document.addEventListener('DOMContentLoaded', () => {
             previewPager.style.display = 'none';
         }
 
-        // Generate static image url
-        // Relies on static mount /processed/{doc_id}/page_{page_num}.jpg
         const imgUrl = `/processed/${activeDocId}/page_${currentPage}.jpg`;
         
-        const img = document.createElement('img');
-        img.className = 'preview-image';
-        img.src = imgUrl;
-        img.alt = `Document Page ${currentPage}`;
-        img.onerror = () => {
-            previewViewport.innerHTML = `<div class="preview-empty">Preview not generated for Page ${currentPage}</div>`;
-        };
-        
-        previewViewport.appendChild(img);
+        // Fetch preprocessed preview image securely using authorization token
+        API.fetchWithAuth(imgUrl)
+            .then(res => {
+                if (!res.ok) {
+                    throw new Error("Unauthorized preview access");
+                }
+                return res.blob();
+            })
+            .then(blob => {
+                const objectUrl = URL.createObjectURL(blob);
+                const img = document.createElement('img');
+                img.className = 'preview-image';
+                img.src = objectUrl;
+                img.alt = `Document Page ${currentPage}`;
+                img.onload = () => {
+                    URL.revokeObjectURL(objectUrl);
+                };
+                img.onerror = () => {
+                    previewViewport.innerHTML = `<div class="preview-empty">Preview not generated for Page ${currentPage}</div>`;
+                };
+                previewViewport.appendChild(img);
+            })
+            .catch(err => {
+                previewViewport.innerHTML = `<div class="preview-empty">Access Denied or Preview Unavailable</div>`;
+            });
     }
 
-    // Pager controls
     prevPageBtn.addEventListener('click', () => {
         if (currentPage > 1) {
             currentPage--;
@@ -331,7 +571,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // --- Reset Document Session ---
     newDocBtn.addEventListener('click', () => {
         resetSession();
     });
@@ -339,7 +578,6 @@ document.addEventListener('DOMContentLoaded', () => {
     function resetSession() {
         if (isUploading || isAnswering) return;
 
-        // Clear active vars
         activeDocId = null;
         pageCount = 0;
         currentPage = 1;
@@ -349,29 +587,24 @@ document.addEventListener('DOMContentLoaded', () => {
             clearInterval(processingInterval);
         }
 
-        // Reset UI Panels
         docActiveView.style.display = 'none';
         previewViewport.innerHTML = '<div class="preview-empty">No preview available</div>';
         previewPager.style.display = 'none';
         newDocBtn.style.display = 'none';
         
-        // Reset Inputs
         questionInput.value = '';
         questionInput.disabled = true;
         questionInput.placeholder = "Upload a document to begin asking...";
         sendBtn.disabled = true;
         
-        // Reset Q&A history logs
         conversationContainer.innerHTML = '';
         conversationContainer.style.display = 'none';
         emptyQaState.style.display = 'flex';
         
-        // Show upload dropzone
         dropzone.style.display = 'flex';
         fileInput.value = '';
     }
 
-    // --- Suggestion Questions Click handler ---
     document.querySelectorAll('.btn-suggestion').forEach(btn => {
         btn.addEventListener('click', () => {
             const query = btn.getAttribute('data-q');
@@ -382,23 +615,17 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // --- Q&A Submit Logic ---
-
     sendBtn.addEventListener('click', () => {
         submitQuestion();
     });
 
     questionInput.addEventListener('keydown', (e) => {
-        // Send on Enter, newline on Shift+Enter
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             submitQuestion();
         }
     });
 
-    /**
-     * Submit question to endpoint.
-     */
     async function submitQuestion() {
         const question = questionInput.value.trim();
         if (!question || !activeDocId || isAnswering || !isConnected) return;
@@ -407,12 +634,10 @@ document.addEventListener('DOMContentLoaded', () => {
         questionInput.disabled = true;
         sendBtn.disabled = true;
         
-        // Show inline loader
         emptyQaState.style.display = 'none';
         conversationContainer.style.display = 'flex';
         answerLoader.style.display = 'flex';
         
-        // Rotate query status indicators
         const searchStages = [
             "Searching document...",
             "Finding relevant evidence...",
@@ -427,7 +652,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }, 1500);
 
-        // Prepend user turn to chat viewport immediately
         appendUserMessage(question);
 
         try {
@@ -436,10 +660,8 @@ document.addEventListener('DOMContentLoaded', () => {
             clearInterval(statusTimer);
             answerLoader.style.display = 'none';
             
-            // Render grounded system response
             appendSystemResponse(askResponse);
             
-            // Clear input and focus
             questionInput.value = '';
             questionInput.disabled = false;
             sendBtn.disabled = false;
@@ -467,9 +689,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    /**
-     * Appends User Question UI node to conversation container.
-     */
     function appendUserMessage(text) {
         const turnDiv = document.createElement('div');
         turnDiv.className = 'chat-turn';
@@ -483,9 +702,6 @@ document.addEventListener('DOMContentLoaded', () => {
         conversationContainer.scrollTop = conversationContainer.scrollHeight;
     }
 
-    /**
-     * Appends Grounded System Response UI node to conversation container.
-     */
     function appendSystemResponse(data) {
         const lastTurn = conversationContainer.lastElementChild;
         if (!lastTurn) return;
@@ -493,7 +709,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const systemDiv = document.createElement('div');
         systemDiv.className = 'chat-system-answer';
 
-        // 1. Answer text container
         const ansBody = document.createElement('div');
         ansBody.className = 'answer-body';
 
@@ -504,7 +719,6 @@ document.addEventListener('DOMContentLoaded', () => {
             ansBody.textContent = data.answer;
             systemDiv.appendChild(ansBody);
 
-            // 2. Evidence block
             if (data.evidence && data.evidence.length > 0) {
                 const evidenceSec = document.createElement('div');
                 evidenceSec.className = 'evidence-section';
@@ -539,7 +753,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        // 3. Technical collapsible details
         const details = document.createElement('details');
         details.className = 'answer-details';
         
@@ -550,7 +763,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const detailsContent = document.createElement('div');
         detailsContent.className = 'answer-details-content';
         
-        // Score & counts
         let retPages = [];
         if (data.retrieval) {
             retPages = data.retrieval.pages_considered || [];
@@ -570,9 +782,6 @@ document.addEventListener('DOMContentLoaded', () => {
         conversationContainer.scrollTop = conversationContainer.scrollHeight;
     }
 
-    /**
-     * Appends an error notice block inside conversation log.
-     */
     function appendErrorTurn(errMsg) {
         const lastTurn = conversationContainer.lastElementChild;
         if (!lastTurn) return;
@@ -590,9 +799,4 @@ document.addEventListener('DOMContentLoaded', () => {
         lastTurn.appendChild(errorDiv);
         conversationContainer.scrollTop = conversationContainer.scrollHeight;
     }
-
-    // --- Startup Loop ---
-    checkSystemConnection();
-    // Refresh health status every 30 seconds
-    setInterval(checkSystemConnection, 30000);
 });

@@ -40,6 +40,7 @@ def init_db() -> None:
     CREATE TABLE IF NOT EXISTS documents (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         doc_id TEXT UNIQUE NOT NULL,
+        owner_id TEXT,
         filename TEXT NOT NULL,
         stored_path TEXT,
         file_type TEXT NOT NULL,
@@ -100,6 +101,10 @@ def init_db() -> None:
             cursor.execute("PRAGMA table_info(documents);")
             existing_columns = [row["name"] for row in cursor.fetchall()]
             
+            if "owner_id" not in existing_columns:
+                logger.info("Migrating database: adding 'owner_id' to documents table.")
+                conn.execute("ALTER TABLE documents ADD COLUMN owner_id TEXT;")
+
             if "stored_path" not in existing_columns:
                 logger.info("Migrating database: adding 'stored_path' to documents table.")
                 conn.execute("ALTER TABLE documents ADD COLUMN stored_path TEXT;")

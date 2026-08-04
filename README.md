@@ -342,26 +342,52 @@ Multimodal-RAG-vqa/
 - [x] **Phase 7 — Custom Frontend**: Minimal responsive static document viewer and research Q&A tool (HTML/CSS/JS) served directly from the backend.
 - [x] **Phase 8 — Final Integration, Real VLM Validation, Production Readiness & Final Project Evaluation**: Systematic testing of retrieval accuracy and answer quality.
 - [x] **Phase 9 — Firebase / Cloud Firestore Backend Integration**: Connector to Firebase Cloud Firestore for persistent cloud storage and future authentication support.
+- [x] **Phase 10 — Firebase Authentication & User Data Isolation**: Secure multi-user login, registration, and strict document/retrieval data isolation.
 
 ---
 
 ## Firebase / Firestore Setup
 
-To integrate Firebase/Firestore for storage:
+To integrate Firebase/Firestore for storage and authentication:
 1. **Create Firebase Project**: Go to the [Firebase Console](https://console.firebase.google.com/) and create a new project.
 2. **Enable Cloud Firestore**: Inside your project settings, enable Cloud Firestore in Native mode.
-3. **Generate Private Key**: Navigate to **Project Settings > Service Accounts**, select **Firebase Admin SDK**, and click **Generate New Private Key**.
-4. **Place Service Account File**: Download the generated JSON credentials file and place it locally at:
+3. **Enable Firebase Authentication**: Navigate to **Build > Authentication**, click **Get Started**, enable the **Email/Password** sign-in provider, and save.
+4. **Generate Private Key**: Navigate to **Project Settings > Service Accounts**, select **Firebase Admin SDK**, and click **Generate New Private Key**.
+5. **Place Service Account File**: Download the generated JSON credentials file and place it locally at:
    `secrets/firebase-service-account.json` (do not commit this file to git).
-5. **Configure Environment Variables**: Update your local `.env` file to enable Firebase storage and specify the credentials path:
+6. **Register Web App**: Navigate to **Project Settings > General**, go to the **Your Apps** section, add a **Web App**, and retrieve your client config values.
+7. **Configure Environment Variables**: Update your local `.env` file to enable Firebase storage and specify the credentials path along with client Web App SDK details:
    ```ini
    FIREBASE_ENABLED=true
    FIREBASE_CREDENTIALS_PATH=secrets/firebase-service-account.json
    FIREBASE_PROJECT_ID=multimodal-rag-vqa
+   
+   # Frontend Client-side Web App configurations (non-sensitive)
+   FIREBASE_API_KEY=AIzaSyA...
+   FIREBASE_AUTH_DOMAIN=multimodal-rag-vqa.firebaseapp.com
+   FIREBASE_APP_ID=1:12345...
    ```
-6. **Verify Connection**: Run the connection test script:
+8. **Verify Connection**: Run the connection test script:
    ```bash
    python scripts/test_firebase_connection.py
    ```
    If successful, it will write, read, and delete a test document, outputting `FIREBASE CONNECTION: PASS`.
+
+---
+
+## Protected API Endpoints & Multi-User Isolation
+
+Authentication is enforced on the FastAPI backend for all user-specific data paths. Every protected endpoint extracts and verifies the Firebase ID Token passed via `Authorization: Bearer <TOKEN>`.
+
+### Authentication Rules
+- **Missing Token / Invalid Token / Expired Token**: Returns `401 Unauthorized`.
+- **Cross-user Access (User A requests User B's files)**: Returns `403 Forbidden`.
+- **Legacy Documents (owner_id = null)**: Isolated and hidden from normal authenticated users.
+
+### E2E Security Tests
+Run the dedicated security regression suite:
+```bash
+pytest tests/test_auth_isolation.py -vv
+```
+This tests document, OCR, embeddings, retrieval, image rendering, chat history, and deletion isolation.
 

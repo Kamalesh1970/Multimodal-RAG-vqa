@@ -7,22 +7,83 @@
     <link rel="stylesheet" href="/frontend/css/styles.css">
 </head>
 <body>
-    <header class="app-header">
+    <header class="app-header" style="display: none;">
         <div class="header-logo">
             <h1>Multimodal RAG</h1>
             <span class="header-subtitle">Visual Document Question Answering</span>
         </div>
         <div class="header-status">
+            <span id="user-display" class="user-display" style="display: none; margin-right: 15px; font-weight: 500;"></span>
+            <button id="logout-btn" class="btn btn-secondary" style="display: none; margin-right: 15px;">Logout</button>
             <span id="connection-badge" class="badge badge-checking">Checking Connection...</span>
         </div>
     </header>
 
-    <main class="app-layout">
+    <!-- Auth Loading Screen -->
+    <div id="auth-loading" class="auth-loading">
+        <div class="loading-spinner"></div>
+        <p style="font-weight: 500; font-size: 14px; color: var(--text-secondary);">Checking session...</p>
+    </div>
+
+    <!-- Auth Panel Container -->
+    <div id="auth-container" class="auth-container" style="display: none;">
+        <div class="auth-card">
+            <h2 id="auth-title">Sign In</h2>
+            <p id="auth-subtitle" class="auth-subtitle">Enter your email and password to access the app.</p>
+            
+            <div id="auth-error" class="auth-error-msg" style="display: none;"></div>
+            
+            <form id="auth-form">
+                <!-- Name input only visible for register -->
+                <div class="form-group" id="name-group" style="display: none;">
+                    <label for="auth-name">Name</label>
+                    <input type="text" id="auth-name" class="form-input" placeholder="Your name">
+                </div>
+                
+                <div class="form-group">
+                    <label for="auth-email">Email</label>
+                    <input type="email" id="auth-email" class="form-input" placeholder="you@example.com" required autocomplete="username">
+                </div>
+                
+                <div class="form-group">
+                    <label for="auth-password">Password</label>
+                    <input type="password" id="auth-password" class="form-input" placeholder="••••••••" required autocomplete="current-password">
+                </div>
+                
+                <!-- Confirm Password only visible for register -->
+                <div class="form-group" id="confirm-password-group" style="display: none;">
+                    <label for="auth-confirm-password">Confirm Password</label>
+                    <input type="password" id="auth-confirm-password" class="form-input" placeholder="••••••••" autocomplete="new-password">
+                </div>
+                
+                <button type="submit" id="auth-submit-btn" class="btn btn-primary btn-block">Sign In</button>
+            </form>
+            
+            <div class="auth-switch-prompt">
+                <span id="switch-text">Don't have an account?</span>
+                <a href="#" id="auth-switch-link">Register</a>
+            </div>
+        </div>
+    </div>
+
+    <main class="app-layout" style="display: none;">
         <!-- Left Panel: Document Upload and Preview -->
         <section class="panel doc-panel" aria-label="Document Management">
             <div class="panel-section-header">
                 <h2>Document Source</h2>
                 <button id="new-doc-btn" class="btn btn-secondary" style="display: none;">New Document</button>
+            </div>
+
+            <!-- Document selector dropdown -->
+            <div id="doc-selector-container" class="doc-selector-container" style="display: none; padding: 12px 16px; border-bottom: 1px solid var(--border); background-color: #fafafc; gap: 8px; align-items: center;">
+                <label for="doc-select" style="font-weight: 500; font-size: 13px;">Active Document:</label>
+                <select id="doc-select" class="form-input" style="flex: 1; padding: 4px 8px; font-size: 13px;"></select>
+                <button id="delete-doc-btn" class="btn btn-secondary" style="padding: 4px 8px; color: var(--error); border-color: var(--border);" title="Delete this document">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px; vertical-align: middle;">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                    </svg>
+                </button>
             </div>
 
             <!-- Upload Dropzone -->
@@ -127,9 +188,13 @@
         </section>
     </main>
 
-    <footer class="app-footer-bar">
+    <footer class="app-footer-bar" style="display: none;">
         <span>Multimodal RAG VQA System &copy; 2026</span>
     </footer>
+
+    <!-- Firebase App and Auth SDKs (Compat versions) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
 
     <!-- JavaScript code files -->
     <script src="/frontend/js/api.js"></script>

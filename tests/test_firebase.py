@@ -10,11 +10,18 @@ def reset_firebase_settings():
     orig_path = settings.FIREBASE_CREDENTIALS_PATH
     orig_project_id = settings.FIREBASE_PROJECT_ID
     
+    import os
+    orig_google_env = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if "GOOGLE_APPLICATION_CREDENTIALS" in os.environ:
+        del os.environ["GOOGLE_APPLICATION_CREDENTIALS"]
+        
     yield
     
     settings.FIREBASE_ENABLED = orig_enabled
     settings.FIREBASE_CREDENTIALS_PATH = orig_path
     settings.FIREBASE_PROJECT_ID = orig_project_id
+    if orig_google_env is not None:
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = orig_google_env
 
 def test_firebase_disabled():
     """1. Test Firebase disabled mode."""
@@ -43,13 +50,14 @@ def test_firebase_initialization_mocked():
     with patch("backend.firebase.client.credentials.Certificate") as mock_cert:
         with patch("backend.firebase.client.firebase_admin.initialize_app") as mock_init:
             with patch("backend.firebase.client.firestore.client") as mock_firestore:
-                with patch("backend.firebase.client._firebase_app", None):
-                    with patch("backend.firebase.client._firestore_client", None):
-                        success = initialize_firebase()
-                        assert success is True
-                        mock_cert.assert_called_once()
-                        mock_init.assert_called_once()
-                        mock_firestore.assert_called_once()
+                with patch("backend.firebase.client.firebase_admin._apps", []):
+                    with patch("backend.firebase.client._firebase_app", None):
+                        with patch("backend.firebase.client._firestore_client", None):
+                            success = initialize_firebase()
+                            assert success is True
+                            mock_cert.assert_called_once()
+                            mock_init.assert_called_once()
+                            mock_firestore.assert_called_once()
 
 def test_duplicate_initialization_safety():
     """4. Test duplicate initialization does not re-initialize app."""

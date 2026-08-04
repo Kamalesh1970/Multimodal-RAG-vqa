@@ -196,7 +196,7 @@ def save_to_database(doc_id: str, filename: str, stored_path: str, file_type: st
     return inserted_pages
 
 
-def ingest_document(file_bytes: bytes, filename: str) -> Dict[str, Any]:
+def ingest_document(file_bytes: bytes, filename: str, owner_id: str | None = None) -> Dict[str, Any]:
     """
     E2E Ingestion Orchestration Pipeline:
     1. Validation (extension, size, corrupt check).
@@ -236,7 +236,6 @@ def ingest_document(file_bytes: bytes, filename: str) -> Dict[str, Any]:
         raise IngestionError(500, "Failed to save uploaded file securely.")
 
     # 4. Insert initial DB row in 'processing' status
-    # 4. Insert initial DB row in 'processing' status
     try:
         from backend.storage import repository
         repository.create_document(
@@ -245,7 +244,8 @@ def ingest_document(file_bytes: bytes, filename: str) -> Dict[str, Any]:
             stored_path=str(stored_path),
             file_type=ext.replace(".", ""),
             page_count=0,
-            status="processing"
+            status="processing",
+            owner_id=owner_id
         )
     except Exception as e:
         logger.critical(f"Database insertion failed: {e}", exc_info=True)

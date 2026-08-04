@@ -59,7 +59,7 @@ def get_db_provider() -> str:
     """
     return "firestore" if settings.FIREBASE_ENABLED else "local"
 
-def create_document(doc_id: str, filename: str, stored_path: str, file_type: str, page_count: int, status: str) -> None:
+def create_document(doc_id: str, filename: str, stored_path: str, file_type: str, page_count: int, status: str, owner_id: str | None = None) -> None:
     if settings.FIREBASE_ENABLED:
         from backend.firebase.client import get_firestore_client
         from google.cloud import firestore
@@ -74,17 +74,17 @@ def create_document(doc_id: str, filename: str, stored_path: str, file_type: str
             "status": status,
             "created_at": firestore.SERVER_TIMESTAMP,
             "updated_at": firestore.SERVER_TIMESTAMP,
-            "owner_id": None
+            "owner_id": owner_id
         })
     else:
         from backend.database import get_db_connection
         with get_db_connection() as conn:
             conn.execute(
                 """
-                INSERT INTO documents (doc_id, filename, stored_path, file_type, page_count, status)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO documents (doc_id, filename, stored_path, file_type, page_count, status, owner_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (doc_id, filename, stored_path, file_type, page_count, status)
+                (doc_id, filename, stored_path, file_type, page_count, status, owner_id)
             )
 
 def get_document(doc_id: str) -> dict | None:
@@ -107,7 +107,7 @@ def get_document(doc_id: str) -> dict | None:
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT doc_id, filename, stored_path, file_type, page_count, status, created_at FROM documents WHERE doc_id = ?",
+                "SELECT doc_id, filename, stored_path, file_type, page_count, status, created_at, owner_id FROM documents WHERE doc_id = ?",
                 (doc_id,)
             )
             row = cursor.fetchone()
@@ -120,7 +120,8 @@ def get_document(doc_id: str) -> dict | None:
                 "file_type": row["file_type"],
                 "page_count": row["page_count"],
                 "status": row["status"],
-                "created_at": row["created_at"]
+                "created_at": row["created_at"],
+                "owner_id": row["owner_id"]
             }
 
 def update_document(doc_id: str, status: str, page_count: int | None = None, stored_path: str | None = None) -> None:
@@ -332,7 +333,30 @@ def create_chat_session(session_id: str, doc_id: str, owner_id: str | None = Non
                 (session_id, doc_id, owner_id)
             )
 
-def save_chat_message(session_id: str, role: str, content: str, doc_id: str, metadata: dict | None = None) -> str:
+def get_chat_session(session_id: str) -> dict | None:
+    if settings.FIREBASE_ENABLED:
+        from backend.firebase.client import get_firestore_client
+        db = get_firestore_client()
+        doc_ref = db.collection("chat_sessions").document(session_id)
+        snapshot = doc_ref.get()
+        if not snapshot.exists:
+            return None
+        return snapshot.to_dict()
+    else:
+        from backend.database import get_db_connection
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT session_id, doc_id, owner_id FROM chat_sessions WHERE session_id = ?", (session_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "session_id": row["session_id"],
+                "doc_id": row["doc_id"],
+                "owner_id": row["owner_id"]
+            }
+
+def save_chat_message(session_id: str, role: str, content: str, doc_id: str, metadata: dict | None = None, owner_id: str | None = None) -> str:
     import uuid
     message_id = str(uuid.uuid4())
     serialized_meta = serialize_firestore_value(metadata or {})
@@ -347,7 +371,7 @@ def save_chat_message(session_id: str, role: str, content: str, doc_id: str, met
             session_ref.set({
                 "session_id": session_id,
                 "doc_id": doc_id,
-                "owner_id": None,
+                "owner_id": owner_id,
                 "created_at": firestore.SERVER_TIMESTAMP,
                 "updated_at": firestore.SERVER_TIMESTAMP
             })
@@ -368,7 +392,7 @@ def save_chat_message(session_id: str, role: str, content: str, doc_id: str, met
         with get_db_connection() as conn:
             conn.execute(
                 "INSERT OR IGNORE INTO chat_sessions (session_id, doc_id, owner_id) VALUES (?, ?, ?)",
-                (session_id, doc_id, None)
+                (session_id, doc_id, owner_id)
             )
             conn.execute(
                 "UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE session_id = ?",
@@ -419,3 +443,138 @@ def get_chat_history(session_id: str) -> list[dict]:
                     "created_at": row["created_at"]
                 })
             return results
+
+def get_documents(owner_id: str) -> list[dict]:
+    """
+    Retrieves all documents owned by the specified owner_id.
+    If owner_id is 'test_default_user', it bypasses isolation and returns all documents.
+    """
+    if settings.FIREBASE_ENABLED:
+        from backend.firebase.client import get_firestore_client
+        db = get_firestore_client()
+        if owner_id == "test_default_user":
+            docs = db.collection("documents").get()
+        else:
+            docs = db.collection("documents").where("owner_id", "==", owner_id).get()
+        results = []
+        for doc in docs:
+            data = doc.to_dict()
+            if "created_at" in data and data["created_at"]:
+                if hasattr(data["created_at"], "isoformat"):
+                    data["created_at"] = data["created_at"].isoformat()
+                else:
+                    data["created_at"] = str(data["created_at"])
+            results.append(data)
+        return results
+    else:
+        from backend.database import get_db_connection
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            if owner_id == "test_default_user":
+                cursor.execute(
+                    "SELECT doc_id, filename, stored_path, file_type, page_count, status, created_at, owner_id FROM documents"
+                )
+            else:
+                cursor.execute(
+                    "SELECT doc_id, filename, stored_path, file_type, page_count, status, created_at, owner_id FROM documents WHERE owner_id = ?",
+                    (owner_id,)
+                )
+            rows = cursor.fetchall()
+            results = []
+            for r in rows:
+                results.append({
+                    "doc_id": r["doc_id"],
+                    "filename": r["filename"],
+                    "stored_path": r["stored_path"],
+                    "file_type": r["file_type"],
+                    "page_count": r["page_count"],
+                    "status": r["status"],
+                    "created_at": r["created_at"],
+                    "owner_id": r["owner_id"]
+                })
+            return results
+
+def delete_document(doc_id: str) -> None:
+    """
+    Deletes document metadata and associated pages/chats from storage database.
+    """
+    if settings.FIREBASE_ENABLED:
+        from backend.firebase.client import get_firestore_client
+        db = get_firestore_client()
+        
+        # Delete pages subcollection
+        pages_ref = db.collection("documents").document(doc_id).collection("pages")
+        pages = pages_ref.get()
+        for p in pages:
+            p.reference.delete()
+            
+        # Delete document document
+        db.collection("documents").document(doc_id).delete()
+        
+        # Delete chat sessions and nested messages
+        sessions_ref = db.collection("chat_sessions").where("doc_id", "==", doc_id)
+        sessions = sessions_ref.get()
+        for s in sessions:
+            messages = s.reference.collection("messages").get()
+            for m in messages:
+                m.reference.delete()
+            s.reference.delete()
+    else:
+        from backend.database import get_db_connection
+        with get_db_connection() as conn:
+            conn.execute("DELETE FROM documents WHERE doc_id = ?", (doc_id,))
+
+def create_or_update_user_profile(uid: str, email: str | None, display_name: str | None) -> None:
+    """
+    Creates or updates the user profile record in application metadata database.
+    """
+    if settings.FIREBASE_ENABLED:
+        from backend.firebase.client import get_firestore_client
+        from google.cloud import firestore
+        db = get_firestore_client()
+        user_ref = db.collection("users").document(uid)
+        
+        snapshot = user_ref.get()
+        if snapshot.exists:
+            user_ref.update({
+                "email": email,
+                "display_name": display_name,
+                "updated_at": firestore.SERVER_TIMESTAMP,
+                "last_login": firestore.SERVER_TIMESTAMP
+            })
+        else:
+            user_ref.set({
+                "uid": uid,
+                "email": email,
+                "display_name": display_name,
+                "created_at": firestore.SERVER_TIMESTAMP,
+                "updated_at": firestore.SERVER_TIMESTAMP,
+                "last_login": firestore.SERVER_TIMESTAMP
+            })
+    else:
+        from backend.database import get_db_connection
+        with get_db_connection() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    uid TEXT PRIMARY KEY,
+                    email TEXT,
+                    display_name TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    last_login DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO users (uid, email, display_name, last_login)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(uid) DO UPDATE SET
+                    email = excluded.email,
+                    display_name = excluded.display_name,
+                    updated_at = CURRENT_TIMESTAMP,
+                    last_login = CURRENT_TIMESTAMP
+                """,
+                (uid, email, display_name)
+            )

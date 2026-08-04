@@ -644,8 +644,8 @@ def test_offline_ocr_budget_truncation(mock_generate, mock_retrieve, client):
         # Populate DB entries manually to pass documents/pages validation
         with get_db_connection() as conn:
             conn.execute(
-                "INSERT INTO documents (doc_id, filename, file_type, status, page_count) VALUES (?, ?, ?, ?, ?)",
-                (doc_id, "dummy.pdf", "pdf", "completed", 1)
+                "INSERT INTO documents (doc_id, filename, file_type, status, page_count, owner_id) VALUES (?, ?, ?, ?, ?, ?)",
+                (doc_id, "dummy.pdf", "pdf", "completed", 1, "test_default_user")
             )
             conn.execute(
                 "INSERT INTO pages (doc_id, page_number, width, height, ocr_text, ocr_blocks_json) VALUES (?, ?, ?, ?, ?, ?)",

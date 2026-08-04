@@ -86,6 +86,9 @@ class Settings:
     FIREBASE_ENABLED: bool = os.getenv("FIREBASE_ENABLED", "false").lower() == "true"
     FIREBASE_CREDENTIALS_PATH: str = os.getenv("FIREBASE_CREDENTIALS_PATH", "secrets/firebase-service-account.json")
     FIREBASE_PROJECT_ID: str | None = os.getenv("FIREBASE_PROJECT_ID")
+    FIREBASE_API_KEY: str | None = os.getenv("FIREBASE_API_KEY")
+    FIREBASE_AUTH_DOMAIN: str | None = os.getenv("FIREBASE_AUTH_DOMAIN")
+    FIREBASE_APP_ID: str | None = os.getenv("FIREBASE_APP_ID")
     
     def __init__(self):
         # Validate weights

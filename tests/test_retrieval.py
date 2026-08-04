@@ -78,8 +78,8 @@ def test_document_validation(client):
     # Registering processing document manually
     with get_db_connection() as conn:
         conn.execute(
-            "INSERT INTO documents (doc_id, filename, file_type, status) VALUES (?, ?, ?, ?)",
-            ("processing-uuid", "test.png", "png", "processing")
+            "INSERT INTO documents (doc_id, filename, file_type, status, owner_id) VALUES (?, ?, ?, ?, ?)",
+            ("processing-uuid", "test.png", "png", "processing", "test_default_user")
         )
     response = client.post("/retrieve", json={"doc_id": "processing-uuid", "question": "test query"})
     assert response.status_code == 400

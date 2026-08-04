@@ -22,6 +22,7 @@ def test_db(tmp_path):
     orig_processed_dir = settings.PROCESSED_DIR
     orig_indexes_dir = settings.INDEXES_DIR
     orig_vector_index_dir = settings.VECTOR_INDEX_DIR
+    orig_firebase = settings.FIREBASE_ENABLED
     
     # Apply overrides
     settings.DATABASE_PATH = temp_db_path
@@ -29,6 +30,7 @@ def test_db(tmp_path):
     settings.PROCESSED_DIR = temp_processed_dir
     settings.INDEXES_DIR = temp_indexes_dir
     settings.VECTOR_INDEX_DIR = temp_indexes_dir
+    settings.FIREBASE_ENABLED = False
     
     # Auto-initialize database tables for test isolation
     from backend.database import init_db
@@ -49,6 +51,7 @@ def test_db(tmp_path):
     settings.PROCESSED_DIR = orig_processed_dir
     settings.INDEXES_DIR = orig_indexes_dir
     settings.VECTOR_INDEX_DIR = orig_vector_index_dir
+    settings.FIREBASE_ENABLED = orig_firebase
 
 @pytest.fixture
 def client():

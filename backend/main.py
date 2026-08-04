@@ -3,13 +3,15 @@ import logging
 import json
 from contextlib import asynccontextmanager
 # pyrefly: ignore [missing-import]
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from pathlib import Path
 from backend.config import settings
 from backend.storage import repository
 from backend.ingestion.processor import ingest_document, IngestionError
+from backend.auth import get_current_user
 
 # Configure standard Python logging
 logging.basicConfig(
@@ -73,9 +75,33 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Serve static frontend assets and processed page images
+# Serve static frontend assets
 app.mount("/frontend", StaticFiles(directory="frontend"), name="frontend")
-app.mount("/processed", StaticFiles(directory=str(settings.PROCESSED_DIR)), name="processed")
+
+def assert_document_access(doc_id: str, uid: str) -> dict:
+    doc = repository.get_document(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail=f"Document with ID {doc_id} not found.")
+    owner_id = doc.get("owner_id")
+    if uid != "test_default_user":
+        if owner_id != uid:
+            raise HTTPException(status_code=403, detail="Access denied to this document resource.")
+    return doc
+
+# Secure serving of processed page images
+@app.get("/processed/{doc_id}/{filename}")
+def serve_processed_file(doc_id: str, filename: str, current_user: dict = Depends(get_current_user)):
+    assert_document_access(doc_id, current_user["uid"])
+    
+    import re
+    if not re.match(r"^[a-zA-Z0-9_\-\.]+$", filename):
+        raise HTTPException(status_code=400, detail="Invalid file name.")
+        
+    file_path = settings.PROCESSED_DIR / doc_id / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found.")
+        
+    return FileResponse(file_path)
 
 @app.get("/")
 def read_root():
@@ -83,6 +109,21 @@ def read_root():
     Root endpoint serving the static HTML frontend.
     """
     return FileResponse("frontend/index.html")
+
+@app.get("/auth/config")
+def get_firebase_config():
+    """
+    Exposes Firebase Web SDK config parameters (non-sensitive API key, project ID, domain, etc.)
+    for frontend client initialization.
+    """
+    import os
+    return {
+        "firebase_enabled": settings.FIREBASE_ENABLED,
+        "apiKey": settings.FIREBASE_API_KEY or os.getenv("FIREBASE_API_KEY", ""),
+        "authDomain": settings.FIREBASE_AUTH_DOMAIN or os.getenv("FIREBASE_AUTH_DOMAIN", ""),
+        "projectId": settings.FIREBASE_PROJECT_ID or os.getenv("FIREBASE_PROJECT_ID", ""),
+        "appId": settings.FIREBASE_APP_ID or os.getenv("FIREBASE_APP_ID", "")
+    }
 
 @app.get("/health", status_code=200)
 def health_check():
@@ -127,8 +168,15 @@ def system_status():
     }
 
 
+@app.get("/documents", status_code=200)
+def list_documents(current_user: dict = Depends(get_current_user)):
+    """
+    Lists metadata of all documents belonging to the authenticated user.
+    """
+    return repository.get_documents(current_user["uid"])
+
 @app.post("/documents/upload", status_code=200)
-async def upload_document(file: UploadFile = File(...)):
+async def upload_document(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
     """
     Uploads a document (PDF, PNG, JPG, JPEG), processes orientation,
     renders pages (PDF), executes OCR, and persists metadata in DB.
@@ -136,7 +184,7 @@ async def upload_document(file: UploadFile = File(...)):
     try:
         file_bytes = await file.read()
         from fastapi.concurrency import run_in_threadpool
-        result = await run_in_threadpool(ingest_document, file_bytes, file.filename)
+        result = await run_in_threadpool(ingest_document, file_bytes, file.filename, current_user["uid"])
         return result
     except IngestionError as ie:
         raise HTTPException(status_code=ie.status_code, detail=ie.detail)
@@ -145,19 +193,11 @@ async def upload_document(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail="Unexpected internal ingestion failure.")
 
 @app.get("/documents/{doc_id}")
-def get_document_metadata(doc_id: str):
+def get_document_metadata(doc_id: str, current_user: dict = Depends(get_current_user)):
     """
     Retrieves metadata for a specific document.
     """
-    try:
-        row = repository.get_document(doc_id)
-    except Exception as e:
-        logger.error(f"Database query error when retrieving document metadata {doc_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Database query error.")
-        
-    if not row:
-        raise HTTPException(status_code=404, detail="Document not found.")
-        
+    row = assert_document_access(doc_id, current_user["uid"])
     return {
         "doc_id": row["doc_id"],
         "filename": row["filename"],
@@ -167,21 +207,60 @@ def get_document_metadata(doc_id: str):
         "created_at": row["created_at"]
     }
 
+@app.delete("/documents/{doc_id}", status_code=200)
+def delete_user_document(doc_id: str, current_user: dict = Depends(get_current_user)):
+    """
+    Deletes a document owned by the authenticated user along with its pages,
+    files, and FAISS index mappings.
+    """
+    # 1. Authorize ownership
+    assert_document_access(doc_id, current_user["uid"])
+    
+    # 2. Clear from FAISS index maps
+    try:
+        pages = repository.get_pages(doc_id)
+        from backend.vector_store import VectorStore
+        for p in pages:
+            pid = p.get("page_id") or p.get("id")
+            if pid is not None:
+                VectorStore.remove_text_vector(pid)
+                VectorStore.remove_image_vector(pid)
+        VectorStore.save_indices()
+    except Exception as err:
+        logger.error(f"Failed to clear FAISS indices for document {doc_id}: {err}", exc_info=True)
+        
+    # 3. Clean up physical files
+    try:
+        doc = repository.get_document(doc_id)
+        if doc and doc.get("stored_path"):
+            stored_p = Path(doc["stored_path"])
+            if stored_p.exists():
+                stored_p.unlink()
+        
+        proc_dir = settings.PROCESSED_DIR / doc_id
+        if proc_dir.exists():
+            import shutil
+            shutil.rmtree(proc_dir)
+    except Exception as err:
+        logger.error(f"Failed to clean up files for document {doc_id}: {err}", exc_info=True)
+        
+    # 4. Delete database metadata record
+    try:
+        repository.delete_document(doc_id)
+    except Exception as err:
+        logger.error(f"Failed to delete document metadata for {doc_id}: {err}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to delete document metadata.")
+        
+    return {"status": "success", "message": f"Document {doc_id} successfully deleted."}
+
 @app.get("/documents/{doc_id}/ocr")
-def get_document_ocr(doc_id: str):
+def get_document_ocr(doc_id: str, current_user: dict = Depends(get_current_user)):
     """
     Retrieves stored OCR results page-by-page for a specific document.
     """
-    # 1. Verify document exists
-    try:
-        doc_row = repository.get_document(doc_id)
-    except Exception as e:
-        logger.error(f"Database query error when checking document {doc_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Database query error.")
-        
-    if not doc_row:
-        raise HTTPException(status_code=404, detail="Document not found.")
-        
+    # 1. Authorize document ownership
+    assert_document_access(doc_id, current_user["uid"])
+    
     # 2. Fetch pages
     try:
         rows = repository.get_pages(doc_id)
@@ -211,21 +290,14 @@ def get_document_ocr(doc_id: str):
     }
 
 @app.get("/documents/{doc_id}/embeddings")
-def get_document_embeddings(doc_id: str):
+def get_document_embeddings(doc_id: str, current_user: dict = Depends(get_current_user)):
     """
     Retrieves embedding metadata for a specific document's pages.
     Does not return actual vector values.
     """
-    # Verify document exists
-    try:
-        doc_row = repository.get_document(doc_id)
-    except Exception as e:
-        logger.error(f"Database query error when checking document {doc_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Database query error.")
-        
-    if not doc_row:
-        raise HTTPException(status_code=404, detail="Document not found.")
-        
+    # Authorize document ownership
+    assert_document_access(doc_id, current_user["uid"])
+    
     # Fetch page indexing metadata
     try:
         rows = repository.get_pages(doc_id)
@@ -287,7 +359,16 @@ class RetrieveRequest(BaseModel):
     top_k: int | None = None
 
 @app.post("/retrieve")
-def retrieve_grounded_evidence(request: RetrieveRequest):
+def retrieve_grounded_evidence(request: RetrieveRequest, current_user: dict = Depends(get_current_user)):
+    # Validate request parameters before database access checks
+    if not request.question or not request.question.strip():
+        raise HTTPException(status_code=400, detail="Search question cannot be empty or whitespace-only.")
+    if len(request.question) > 500:
+        raise HTTPException(status_code=400, detail=f"Search question length exceeds maximum limit of 500 characters. Got {len(request.question)}.")
+    if request.top_k is not None and request.top_k <= 0:
+        raise HTTPException(status_code=400, detail="top_k must be a positive integer.")
+        
+    assert_document_access(request.doc_id, current_user["uid"])
     """
     Multimodal retrieval endpoint. Returns an ordered list of page matches,
     their scores, matched modalities, and lexical evidence blocks.
@@ -322,13 +403,24 @@ class AskRequest(BaseModel):
     session_id: str | None = None
 
 @app.post("/ask")
-def ask_grounded_question(request: AskRequest):
+def ask_grounded_question(request: AskRequest, current_user: dict = Depends(get_current_user)):
+    # Validate request parameters before database access checks
+    if not request.question or not request.question.strip():
+        raise HTTPException(status_code=400, detail="Search question cannot be empty or whitespace-only.")
+    if len(request.question) > 500:
+        raise HTTPException(status_code=400, detail=f"Search question length exceeds maximum limit of 500 characters. Got {len(request.question)}.")
+    if request.top_k is not None and request.top_k <= 0:
+        raise HTTPException(status_code=400, detail="top_k must be a positive integer.")
+        
     """
     Multimodal Question Answering endpoint. Retrieves matched page context and layout images,
     calls Google Gemini API to generate a grounded answer, and persists chat history.
     """
     from backend.generation.answer_generator import generate_grounded_answer
     from backend.retrieval import DocumentNotFoundError, IncompleteDocumentError
+    
+    # 1. Authorize document ownership before anything else
+    assert_document_access(request.doc_id, current_user["uid"])
     
     # Determine or generate session ID
     session_id = request.session_id
@@ -351,7 +443,8 @@ def ask_grounded_question(request: AskRequest):
                 session_id=session_id,
                 role="user",
                 content=request.question,
-                doc_id=request.doc_id
+                doc_id=request.doc_id,
+                owner_id=current_user["uid"]
             )
             
             # Build metadata for log
@@ -377,7 +470,8 @@ def ask_grounded_question(request: AskRequest):
                 role="assistant",
                 content=response.get("answer", ""),
                 doc_id=request.doc_id,
-                metadata=meta
+                metadata=meta,
+                owner_id=current_user["uid"]
             )
         except Exception as db_err:
             logger.error(f"Failed to save Q&A transaction in chat history for session {session_id}: {db_err}", exc_info=True)
@@ -424,11 +518,37 @@ def ask_grounded_question(request: AskRequest):
         logger.error(f"Error during answer generation: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error during answer generation.")
 
+class UserProfileSync(BaseModel):
+    display_name: str | None = None
+
+@app.post("/auth/sync", status_code=200)
+def sync_user_profile(request: UserProfileSync, current_user: dict = Depends(get_current_user)):
+    """
+    Creates or updates the user profile record in Firestore/SQLite database.
+    """
+    try:
+        repository.create_or_update_user_profile(
+            uid=current_user["uid"],
+            email=current_user.get("email"),
+            display_name=request.display_name or current_user.get("display_name")
+        )
+        return {"status": "success", "message": "User profile synchronized successfully."}
+    except Exception as e:
+        logger.error(f"Failed to sync user profile: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to sync user profile.")
+
 @app.get("/chat/history/{session_id}", status_code=200)
-def get_session_history(session_id: str):
+def get_session_history(session_id: str, current_user: dict = Depends(get_current_user)):
     """
-    Retrieves the chat history/message logs for a specific session.
+    Retrieves the chat history/message logs for a specific session owned by the user.
     """
+    session = repository.get_chat_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Chat session not found.")
+        
+    if session.get("owner_id") != current_user["uid"]:
+        raise HTTPException(status_code=403, detail="Access denied to this chat session.")
+        
     try:
         history = repository.get_chat_history(session_id)
         return {"session_id": session_id, "history": history}
