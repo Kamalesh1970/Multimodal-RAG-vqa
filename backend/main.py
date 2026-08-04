@@ -112,7 +112,6 @@ def read_root():
     return FileResponse("frontend/index.html")
 
 @app.get("/auth/config")
-<<<<<<< HEAD
 def get_firebase_config():
     """
     Exposes Firebase Web SDK config parameters (non-sensitive API key, project ID, domain, etc.)
@@ -126,14 +125,6 @@ def get_firebase_config():
         "projectId": settings.FIREBASE_PROJECT_ID or os.getenv("FIREBASE_PROJECT_ID", ""),
         "appId": settings.FIREBASE_APP_ID or os.getenv("FIREBASE_APP_ID", "")
     }
-=======
-def get_auth_config():
-    """
-    Dummy endpoint to handle background authentication configuration requests
-    from browser extensions or stale service workers, preventing 404 log spam.
-    """
-    return {"status": "disabled", "message": "Authentication is not enabled."}
->>>>>>> phase9-fixes
 
 @app.get("/health", status_code=200)
 def health_check():
@@ -185,6 +176,7 @@ def list_documents(current_user: dict = Depends(get_current_user)):
     """
     return repository.get_documents(current_user["uid"])
 
+@app.post("/upload", status_code=200)
 @app.post("/documents/upload", status_code=200)
 async def upload_document(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
     """
@@ -202,24 +194,8 @@ async def upload_document(file: UploadFile = File(...), current_user: dict = Dep
         logger.error(f"Unexpected error during document upload {file.filename}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Unexpected internal ingestion failure.")
 
-@app.get("/documents")
-def list_documents():
-    """
-    Retrieves metadata for all uploaded documents.
-    """
-    try:
-        return repository.get_all_documents()
-    except Exception as e:
-        logger.error(f"Database query error when retrieving documents: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Database query error.")
-
 @app.get("/documents/{doc_id}")
-<<<<<<< HEAD
 def get_document_metadata(doc_id: str, current_user: dict = Depends(get_current_user)):
-=======
-def get_document_metadata(doc_id: str):
-
->>>>>>> phase9-fixes
     """
     Retrieves metadata for a specific document.
     """
