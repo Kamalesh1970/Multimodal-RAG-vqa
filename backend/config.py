@@ -82,6 +82,11 @@ class Settings:
     # Ingestion settings
     MAX_UPLOAD_MB: int = int(os.getenv("MAX_UPLOAD_MB", "20"))
     
+    # Phase 9 Firebase/Firestore configurations
+    FIREBASE_ENABLED: bool = os.getenv("FIREBASE_ENABLED", "false").lower() == "true"
+    FIREBASE_CREDENTIALS_PATH: str = os.getenv("FIREBASE_CREDENTIALS_PATH", "secrets/firebase-service-account.json")
+    FIREBASE_PROJECT_ID: str | None = os.getenv("FIREBASE_PROJECT_ID")
+    
     def __init__(self):
         # Validate weights
         if not (0.0 <= self.TEXT_RETRIEVAL_WEIGHT <= 1.0):
@@ -105,4 +110,30 @@ class Settings:
     def MAX_UPLOAD_SIZE_BYTES(self) -> int:
         return self.MAX_UPLOAD_MB * 1024 * 1024
 
+    @property
+    def resolved_firebase_credentials(self) -> str | None:
+        """
+        Resolves the path to the Firebase credentials JSON file.
+        Checks:
+        1. GOOGLE_APPLICATION_CREDENTIALS env var
+        2. FIREBASE_CREDENTIALS_PATH setting
+        Returns absolute path if found and file exists, or None.
+        """
+        env_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        if env_path:
+            p = Path(env_path)
+            if p.is_absolute():
+                return str(p)
+            return str(PROJECT_ROOT / p)
+            
+        config_path = self.FIREBASE_CREDENTIALS_PATH
+        if config_path:
+            p = Path(config_path)
+            if p.is_absolute():
+                return str(p)
+            return str(PROJECT_ROOT / p)
+            
+        return None
+
 settings = Settings()
+

@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from backend.config import settings
-from backend.database import init_db, get_db_connection
+from backend.storage import repository
 from backend.ingestion.processor import ingest_document, IngestionError
 
 # Configure standard Python logging
@@ -37,12 +37,13 @@ async def lifespan(app: FastAPI):
         logger.critical(f"Directory initialization failed: {e}", exc_info=True)
         raise e
 
-    # 2. Initialize SQLite Database
+    # 2. Initialize Storage Backend (SQLite or Firestore)
     try:
-        init_db()
+        repository.init_storage()
     except Exception as e:
-        logger.critical(f"Database initialization failed: {e}", exc_info=True)
+        logger.critical(f"Storage initialization failed: {e}", exc_info=True)
         raise e
+
         
     # 3. Initialize FAISS Vector Store
     try:
@@ -86,18 +87,24 @@ def read_root():
 @app.get("/health", status_code=200)
 def health_check():
     """
-    Health check endpoint returning status, service name, and active phase.
+    Health check endpoint returning status, service name, phase, and database details.
     """
+    db_provider = repository.get_db_provider()
+    db_connected = repository.is_db_connected()
     return {
         "status": "healthy",
         "service": "Multimodal RAG VQA",
-        "phase": 2
+        "phase": 2,
+        "database": {
+            "provider": db_provider,
+            "connected": db_connected
+        }
     }
 
 @app.get("/system/status", status_code=200)
 def system_status():
     """
-    Returns runtime configuration status and simulation details.
+    Returns runtime configuration status, simulation details, and database details.
     """
     is_simulated = (settings.VLM_PROVIDER == "local")
     if settings.VLM_PROVIDER == "gemini" and not settings.GEMINI_API_KEY:
@@ -105,13 +112,20 @@ def system_status():
     elif settings.VLM_PROVIDER == "openai" and not settings.OPENAI_API_KEY:
         is_simulated = True
         
+    db_provider = repository.get_db_provider()
+    db_connected = repository.is_db_connected()
     return {
         "status": "healthy",
         "project": "Multimodal RAG for Visual Question Answering (VQA)",
         "phase": 7,
         "vlm_provider": settings.VLM_PROVIDER,
-        "generation_mode": "simulated" if is_simulated else "live"
+        "generation_mode": "simulated" if is_simulated else "live",
+        "database": {
+            "provider": db_provider,
+            "connected": db_connected
+        }
     }
+
 
 @app.post("/documents/upload", status_code=200)
 async def upload_document(file: UploadFile = File(...)):
@@ -136,13 +150,7 @@ def get_document_metadata(doc_id: str):
     Retrieves metadata for a specific document.
     """
     try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT doc_id, filename, file_type, page_count, status, created_at FROM documents WHERE doc_id = ?",
-                (doc_id,)
-            )
-            row = cursor.fetchone()
+        row = repository.get_document(doc_id)
     except Exception as e:
         logger.error(f"Database query error when retrieving document metadata {doc_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Database query error.")
@@ -166,10 +174,7 @@ def get_document_ocr(doc_id: str):
     """
     # 1. Verify document exists
     try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT status FROM documents WHERE doc_id = ?", (doc_id,))
-            doc_row = cursor.fetchone()
+        doc_row = repository.get_document(doc_id)
     except Exception as e:
         logger.error(f"Database query error when checking document {doc_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Database query error.")
@@ -179,13 +184,7 @@ def get_document_ocr(doc_id: str):
         
     # 2. Fetch pages
     try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT page_number, width, height, ocr_text, ocr_blocks_json FROM pages WHERE doc_id = ? ORDER BY page_number ASC",
-                (doc_id,)
-            )
-            rows = cursor.fetchall()
+        rows = repository.get_pages(doc_id)
     except Exception as e:
         logger.error(f"Database query error when fetching pages for {doc_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Database query error.")
@@ -219,10 +218,7 @@ def get_document_embeddings(doc_id: str):
     """
     # Verify document exists
     try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT status FROM documents WHERE doc_id = ?", (doc_id,))
-            doc_row = cursor.fetchone()
+        doc_row = repository.get_document(doc_id)
     except Exception as e:
         logger.error(f"Database query error when checking document {doc_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Database query error.")
@@ -232,17 +228,7 @@ def get_document_embeddings(doc_id: str):
         
     # Fetch page indexing metadata
     try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT id, page_number, text_embedding_indexed, image_embedding_indexed, 
-                       text_embedding_model, image_embedding_model 
-                FROM pages WHERE doc_id = ? ORDER BY page_number ASC
-                """,
-                (doc_id,)
-            )
-            rows = cursor.fetchall()
+        rows = repository.get_pages(doc_id)
     except Exception as e:
         logger.error(f"Database query error when fetching embeddings metadata for {doc_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Database query error.")
@@ -263,7 +249,7 @@ def get_document_embeddings(doc_id: str):
     for row in rows:
         pages.append({
             "page_number": row["page_number"],
-            "page_id": row["id"],
+            "page_id": row["page_id"],
             "text_embedding": {
                 "indexed": bool(row["text_embedding_indexed"]),
                 "dimension": text_dim,
@@ -280,6 +266,7 @@ def get_document_embeddings(doc_id: str):
         "doc_id": doc_id,
         "pages": pages
     }
+
 
 @app.get("/system/vector-status")
 def get_system_vector_status():
@@ -332,26 +319,77 @@ class AskRequest(BaseModel):
     doc_id: str
     question: str
     top_k: int | None = None
+    session_id: str | None = None
 
 @app.post("/ask")
 def ask_grounded_question(request: AskRequest):
     """
-    Multimodal Question Answering endpoint. Retrieves matched page context and layout images
-    and calls Google Gemini API to generate a grounded answer.
+    Multimodal Question Answering endpoint. Retrieves matched page context and layout images,
+    calls Google Gemini API to generate a grounded answer, and persists chat history.
     """
     from backend.generation.answer_generator import generate_grounded_answer
     from backend.retrieval import DocumentNotFoundError, IncompleteDocumentError
+    
+    # Determine or generate session ID
+    session_id = request.session_id
+    if not session_id:
+        import uuid
+        session_id = f"session_{uuid.uuid4()}"
+        
     try:
+        # Perform generation/retrieval first to validate request parameters & document existence
         response = generate_grounded_answer(
             doc_id=request.doc_id,
             question=request.question,
             top_k=request.top_k
         )
+        
+        # Save messages to database only after successful generation
+        try:
+            # Save user question to chat session
+            repository.save_chat_message(
+                session_id=session_id,
+                role="user",
+                content=request.question,
+                doc_id=request.doc_id
+            )
+            
+            # Build metadata for log
+            first_evidence_score = 0.0
+            if response.get("evidence"):
+                first_ev = response["evidence"][0]
+                if isinstance(first_ev, dict):
+                    first_evidence_score = first_ev.get("score", 0.0)
+                elif hasattr(first_ev, "score"):
+                    first_evidence_score = getattr(first_ev, "score", 0.0)
+                    
+            meta = {
+                "retrieved_pages": response.get("pages_used", []),
+                "retrieval_score": first_evidence_score,
+                "grounding_status": response.get("grounding_mode", "unverified"),
+                "provider": settings.VLM_PROVIDER,
+                "model": settings.GEMINI_MODEL if settings.VLM_PROVIDER == "gemini" else settings.OPENAI_MODEL
+            }
+            
+            # Save assistant answer to chat session
+            repository.save_chat_message(
+                session_id=session_id,
+                role="assistant",
+                content=response.get("answer", ""),
+                doc_id=request.doc_id,
+                metadata=meta
+            )
+        except Exception as db_err:
+            logger.error(f"Failed to save Q&A transaction in chat history for session {session_id}: {db_err}", exc_info=True)
+            # Do not fail endpoint if database log fails (graceful degradation)
+            
         return {
             "doc_id": request.doc_id,
             "question": request.question,
+            "session_id": session_id,
             **response
         }
+
     except DocumentNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except IncompleteDocumentError as e:
@@ -385,4 +423,17 @@ def ask_grounded_question(request: AskRequest):
             
         logger.error(f"Error during answer generation: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error during answer generation.")
+
+@app.get("/chat/history/{session_id}", status_code=200)
+def get_session_history(session_id: str):
+    """
+    Retrieves the chat history/message logs for a specific session.
+    """
+    try:
+        history = repository.get_chat_history(session_id)
+        return {"session_id": session_id, "history": history}
+    except Exception as e:
+        logger.error(f"Error retrieving chat history for session {session_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to retrieve chat history.")
+
 

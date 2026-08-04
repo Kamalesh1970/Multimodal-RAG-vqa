@@ -3,7 +3,6 @@ import json
 import time
 import numpy as np
 from backend.config import settings
-from backend.database import get_db_connection
 from backend.embeddings.text_embedder import TextEmbedder
 from backend.embeddings.image_embedder import ImageEmbedder
 from backend.vector_store import VectorStore
@@ -86,10 +85,8 @@ def retrieve_evidence(doc_id: str, question: str, top_k: int | None = None) -> l
         raise ValueError(f"Search question length exceeds maximum limit of 500 characters. Got {len(question)}.")
         
     # 2. Verify document exists and is completed
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT status, filename FROM documents WHERE doc_id = ?", (doc_id,))
-        doc_row = cursor.fetchone()
+    from backend.storage import repository
+    doc_row = repository.get_document(doc_id)
         
     if not doc_row:
         raise DocumentNotFoundError(f"Document with ID {doc_id} not found.")
@@ -98,14 +95,8 @@ def retrieve_evidence(doc_id: str, question: str, top_k: int | None = None) -> l
     if status != "completed":
         raise IncompleteDocumentError(f"Document {doc_id} is in '{status}' status and cannot be searched yet.")
         
-    # 3. Retrieve all pages for this document from SQLite
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT id, page_number, ocr_text, ocr_blocks_json FROM pages WHERE doc_id = ? ORDER BY page_number ASC",
-            (doc_id,)
-        )
-        page_rows = cursor.fetchall()
+    # 3. Retrieve all pages for this document from repository
+    page_rows = repository.get_pages(doc_id)
         
     if not page_rows:
         logger.warning(f"Document {doc_id} has no pages in the database.")
@@ -120,6 +111,7 @@ def retrieve_evidence(doc_id: str, question: str, top_k: int | None = None) -> l
             "ocr_text": r["ocr_text"],
             "ocr_blocks_json": r["ocr_blocks_json"]
         }
+
         
     # 4. Generate Embeddings (measure performance)
     t_text_embed_start = time.perf_counter()

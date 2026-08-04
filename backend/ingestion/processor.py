@@ -10,7 +10,6 @@ import fitz  # PyMuPDF
 import numpy as np
 
 from backend.config import settings
-from backend.database import get_db_connection
 from backend.ingestion.ocr import perform_ocr, PageOCRResult
 
 logger = logging.getLogger(__name__)
@@ -170,37 +169,32 @@ def process_pdf_file(stored_path: Path, doc_id: str) -> List[PageOCRResult]:
 
 def save_to_database(doc_id: str, filename: str, stored_path: str, file_type: str, page_results: List[PageOCRResult]) -> List[dict]:
     """
-    Saves document metadata and structured page OCR results inside a database transaction.
+    Saves document metadata and structured page OCR results.
     Returns a list of dictionaries with inserted page primary key ids and page metadata.
     """
+    from backend.storage import repository
+    # Update documents table status and file details
+    repository.update_document(doc_id=doc_id, status="completed", page_count=len(page_results), stored_path=stored_path)
+    
     inserted_pages = []
-    with get_db_connection() as conn:
-        # Update documents table status and file details
-        conn.execute(
-            """
-            UPDATE documents 
-            SET stored_path = ?, page_count = ?, status = 'completed'
-            WHERE doc_id = ?
-            """,
-            (stored_path, len(page_results), doc_id)
+    # Save pages to pages table
+    for pr in page_results:
+        blocks_json = json.dumps([b.model_dump() for b in pr.blocks])
+        page_id = repository.save_page(
+            doc_id=doc_id,
+            page_number=pr.page_number,
+            width=pr.width,
+            height=pr.height,
+            ocr_text=pr.full_text,
+            ocr_blocks_json=blocks_json
         )
-        
-        # Save pages to pages table
-        for pr in page_results:
-            blocks_json = json.dumps([b.model_dump() for b in pr.blocks])
-            cursor = conn.execute(
-                """
-                INSERT INTO pages (doc_id, page_number, width, height, ocr_text, ocr_blocks_json)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (doc_id, pr.page_number, pr.width, pr.height, pr.full_text, blocks_json)
-            )
-            inserted_pages.append({
-                "page_id": cursor.lastrowid,
-                "page_number": pr.page_number,
-                "full_text": pr.full_text
-            })
+        inserted_pages.append({
+            "page_id": page_id,
+            "page_number": pr.page_number,
+            "full_text": pr.full_text
+        })
     return inserted_pages
+
 
 def ingest_document(file_bytes: bytes, filename: str) -> Dict[str, Any]:
     """
@@ -242,21 +236,24 @@ def ingest_document(file_bytes: bytes, filename: str) -> Dict[str, Any]:
         raise IngestionError(500, "Failed to save uploaded file securely.")
 
     # 4. Insert initial DB row in 'processing' status
+    # 4. Insert initial DB row in 'processing' status
     try:
-        with get_db_connection() as conn:
-            conn.execute(
-                """
-                INSERT INTO documents (doc_id, filename, stored_path, file_type, page_count, status)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (doc_id, filename, str(stored_path), ext.replace(".", ""), 0, "processing")
-            )
+        from backend.storage import repository
+        repository.create_document(
+            doc_id=doc_id,
+            filename=filename,
+            stored_path=str(stored_path),
+            file_type=ext.replace(".", ""),
+            page_count=0,
+            status="processing"
+        )
     except Exception as e:
         logger.critical(f"Database insertion failed: {e}", exc_info=True)
         # Delete file if DB insert fails
         if stored_path.exists():
             stored_path.unlink()
         raise IngestionError(500, "Database insertion error.")
+
 
     # 5. Process Ingestion & Run OCR
     try:
@@ -328,28 +325,20 @@ def ingest_document(file_bytes: bytes, filename: str) -> Dict[str, Any]:
                     image_indexed_map[page_id] = True
                     
             # Update database records with indexing status
-            with get_db_connection() as conn:
-                for page_info in inserted_pages:
-                    page_id = page_info["page_id"]
-                    text_ok = 1 if text_indexed_map.get(page_id) else 0
-                    image_ok = 1 if image_indexed_map.get(page_id) else 0
-                    conn.execute(
-                        """
-                        UPDATE pages
-                        SET text_embedding_indexed = ?,
-                            image_embedding_indexed = ?,
-                            text_embedding_model = ?,
-                            image_embedding_model = ?
-                        WHERE id = ?
-                        """,
-                        (
-                            text_ok,
-                            image_ok,
-                            settings.TEXT_EMBEDDING_MODEL if text_ok else None,
-                            settings.IMAGE_EMBEDDING_MODEL if image_ok else None,
-                            page_id
-                        )
-                    )
+            from backend.storage import repository
+            for page_info in inserted_pages:
+                page_id = page_info["page_id"]
+                page_number = page_info["page_number"]
+                text_ok = bool(text_indexed_map.get(page_id))
+                image_ok = bool(image_indexed_map.get(page_id))
+                repository.update_page_indexing(
+                    doc_id=doc_id,
+                    page_number=page_number,
+                    text_indexed=text_ok,
+                    image_indexed=image_ok,
+                    text_model=settings.TEXT_EMBEDDING_MODEL if text_ok else None,
+                    image_model=settings.IMAGE_EMBEDDING_MODEL if image_ok else None
+                )
             
             # Save FAISS indices to disk exactly once per document upload
             VectorStore.save_indices()
@@ -360,13 +349,11 @@ def ingest_document(file_bytes: bytes, filename: str) -> Dict[str, Any]:
         # Update database status to failed
         logger.error(f"Ingestion process failed for doc_id={doc_id}: {process_error}", exc_info=True)
         try:
-            with get_db_connection() as conn:
-                conn.execute(
-                    "UPDATE documents SET status = 'failed' WHERE doc_id = ?",
-                    (doc_id,)
-                )
+            from backend.storage import repository
+            repository.update_document(doc_id=doc_id, status="failed")
         except Exception as db_err:
             logger.critical(f"Failed to set status to failed for doc_id={doc_id}: {db_err}")
+
             
         if isinstance(process_error, IngestionError):
             raise process_error

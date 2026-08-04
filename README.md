@@ -340,4 +340,28 @@ Multimodal-RAG-vqa/
 - [x] **Phase 5 — Gemini Multimodal Grounded Answer Generation**: Structured VQA answers extraction, prompt-injection defense, no-answer checks, and citation metadata.
 - [x] **Phase 6 — Evaluation, Accuracy Improvement & RAG Optimization**: Systematically evaluate and optimize retrieval using Recall@K, MRR, min-max score calibration, query-aware weight adapters, and RRF.
 - [x] **Phase 7 — Custom Frontend**: Minimal responsive static document viewer and research Q&A tool (HTML/CSS/JS) served directly from the backend.
-- [ ] **Phase 8 — Final Integration, Real VLM Validation, Production Readiness & Final Project Evaluation**: Systematic testing of retrieval accuracy and answer quality.
+- [x] **Phase 8 — Final Integration, Real VLM Validation, Production Readiness & Final Project Evaluation**: Systematic testing of retrieval accuracy and answer quality.
+- [x] **Phase 9 — Firebase / Cloud Firestore Backend Integration**: Connector to Firebase Cloud Firestore for persistent cloud storage and future authentication support.
+
+---
+
+## Firebase / Firestore Setup
+
+To integrate Firebase/Firestore for storage:
+1. **Create Firebase Project**: Go to the [Firebase Console](https://console.firebase.google.com/) and create a new project.
+2. **Enable Cloud Firestore**: Inside your project settings, enable Cloud Firestore in Native mode.
+3. **Generate Private Key**: Navigate to **Project Settings > Service Accounts**, select **Firebase Admin SDK**, and click **Generate New Private Key**.
+4. **Place Service Account File**: Download the generated JSON credentials file and place it locally at:
+   `secrets/firebase-service-account.json` (do not commit this file to git).
+5. **Configure Environment Variables**: Update your local `.env` file to enable Firebase storage and specify the credentials path:
+   ```ini
+   FIREBASE_ENABLED=true
+   FIREBASE_CREDENTIALS_PATH=secrets/firebase-service-account.json
+   FIREBASE_PROJECT_ID=multimodal-rag-vqa
+   ```
+6. **Verify Connection**: Run the connection test script:
+   ```bash
+   python scripts/test_firebase_connection.py
+   ```
+   If successful, it will write, read, and delete a test document, outputting `FIREBASE CONNECTION: PASS`.
+

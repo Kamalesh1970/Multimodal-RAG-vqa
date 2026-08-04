@@ -1,4 +1,9 @@
-.env
+# Firebase credentials
+secrets/
+secrets/*.json
+firebase-service-account.json
+*firebase-adminsdk*.json
+
 .venv/
 __pycache__/
 *.pyc
@@ -6,7 +11,12 @@ __pycache__/
 .DS_Store
 *.db
 .venv
-.env.example
+
+# Env
+.env
+.env.*
+!.env.example
+
 # Ignore generated/uploaded/indexed data but keep directories via gitkeep
 data/uploads/*
 !data/uploads/.gitkeep
@@ -14,3 +24,4 @@ data/processed/*
 !data/processed/.gitkeep
 data/indexes/*
 !data/indexes/.gitkeep
+

@@ -6,7 +6,7 @@ import uuid
 from PIL import Image
 from pydantic import BaseModel, Field
 from backend.config import settings
-from backend.database import get_db_connection
+from backend.storage import repository
 from backend.retrieval import retrieve_evidence, DocumentNotFoundError, IncompleteDocumentError
 from backend.generation.gemini_client import generate_content_with_retry
 from backend.generation.openai_client import generate_openai_content_with_retry
@@ -155,10 +155,7 @@ def generate_grounded_answer(doc_id: str, question: str, top_k: int | None = Non
         raise ValueError("Search question cannot be empty or whitespace-only.")
         
     # Check if document exists and is completed
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT status, page_count FROM documents WHERE doc_id = ?", (doc_id,))
-        doc_row = cursor.fetchone()
+    doc_row = repository.get_document(doc_id)
         
     if not doc_row:
         raise DocumentNotFoundError(f"Document with ID {doc_id} not found.")
@@ -203,12 +200,10 @@ def generate_grounded_answer(doc_id: str, question: str, top_k: int | None = Non
     retrieval_blocks = {}
     if intent == "TEXT" and getattr(settings, "VLM_CROP_EVIDENCE", False):
         try:
-            with get_db_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT page_number, ocr_blocks_json FROM pages WHERE doc_id = ?", (doc_id,))
-                for r in cursor.fetchall():
-                    blocks = json.loads(r["ocr_blocks_json"]) if r["ocr_blocks_json"] else []
-                    retrieval_blocks[r["page_number"]] = blocks
+            page_rows = repository.get_pages(doc_id)
+            for r in page_rows:
+                blocks = json.loads(r["ocr_blocks_json"]) if r["ocr_blocks_json"] else []
+                retrieval_blocks[r["page_number"]] = blocks
         except Exception as e:
             logger.error(f"Failed to fetch page block coordinates for cropping: {e}")
         
@@ -385,15 +380,16 @@ def generate_grounded_answer(doc_id: str, question: str, top_k: int | None = Non
     # Align page citation evidence coordinates from original retrieval output
     evidence_output = []
     retrieval_blocks = {}
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT page_number, ocr_blocks_json FROM pages WHERE doc_id = ?", (doc_id,))
-        for r in cursor.fetchall():
+    try:
+        page_rows = repository.get_pages(doc_id)
+        for r in page_rows:
             try:
                 blocks = json.loads(r["ocr_blocks_json"]) if r["ocr_blocks_json"] else []
                 retrieval_blocks[r["page_number"]] = blocks
             except Exception:
                 retrieval_blocks[r["page_number"]] = []
+    except Exception as e:
+        logger.error(f"Failed to fetch page block coordinates for evidence output: {e}")
                 
     for item in validated_resp.evidence:
         bbox = None

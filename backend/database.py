@@ -66,6 +66,29 @@ def init_db() -> None:
         UNIQUE (doc_id, page_number)
     );
     """
+
+    create_chat_sessions_sql = """
+    CREATE TABLE IF NOT EXISTS chat_sessions (
+        session_id TEXT PRIMARY KEY,
+        doc_id TEXT NOT NULL,
+        owner_id TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (doc_id) REFERENCES documents (doc_id) ON DELETE CASCADE
+    );
+    """
+
+    create_chat_messages_sql = """
+    CREATE TABLE IF NOT EXISTS chat_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        metadata_json TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (session_id) REFERENCES chat_sessions (session_id) ON DELETE CASCADE
+    );
+    """
     
     try:
         with get_db_connection() as conn:
@@ -107,8 +130,13 @@ def init_db() -> None:
             if "image_embedding_model" not in existing_pages_columns:
                 logger.info("Migrating database: adding 'image_embedding_model' to pages table.")
                 conn.execute("ALTER TABLE pages ADD COLUMN image_embedding_model TEXT;")
+
+            # 5. Create chat tables if not exist
+            conn.execute(create_chat_sessions_sql)
+            conn.execute(create_chat_messages_sql)
             
         logger.info("Database initialization and migrations completed successfully.")
     except Exception as e:
         logger.critical(f"Failed to initialize database: {e}", exc_info=True)
         raise e
+
