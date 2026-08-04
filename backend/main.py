@@ -1,5 +1,6 @@
 # pyrefly: ignore [missing-import]
 import logging
+# Force config reload
 import json
 from contextlib import asynccontextmanager
 # pyrefly: ignore [missing-import]
@@ -84,6 +85,14 @@ def read_root():
     """
     return FileResponse("frontend/index.html")
 
+@app.get("/auth/config")
+def get_auth_config():
+    """
+    Dummy endpoint to handle background authentication configuration requests
+    from browser extensions or stale service workers, preventing 404 log spam.
+    """
+    return {"status": "disabled", "message": "Authentication is not enabled."}
+
 @app.get("/health", status_code=200)
 def health_check():
     """
@@ -144,8 +153,20 @@ async def upload_document(file: UploadFile = File(...)):
         logger.error(f"Unexpected error during document upload {file.filename}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Unexpected internal ingestion failure.")
 
+@app.get("/documents")
+def list_documents():
+    """
+    Retrieves metadata for all uploaded documents.
+    """
+    try:
+        return repository.get_all_documents()
+    except Exception as e:
+        logger.error(f"Database query error when retrieving documents: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Database query error.")
+
 @app.get("/documents/{doc_id}")
 def get_document_metadata(doc_id: str):
+
     """
     Retrieves metadata for a specific document.
     """

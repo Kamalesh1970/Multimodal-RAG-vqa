@@ -63,19 +63,23 @@ def create_document(doc_id: str, filename: str, stored_path: str, file_type: str
     if settings.FIREBASE_ENABLED:
         from backend.firebase.client import get_firestore_client
         from google.cloud import firestore
-        db = get_firestore_client()
-        doc_ref = db.collection("documents").document(doc_id)
-        doc_ref.set({
-            "doc_id": doc_id,
-            "filename": filename,
-            "stored_path": stored_path,
-            "file_type": file_type,
-            "page_count": page_count,
-            "status": status,
-            "created_at": firestore.SERVER_TIMESTAMP,
-            "updated_at": firestore.SERVER_TIMESTAMP,
-            "owner_id": None
-        })
+        try:
+            db = get_firestore_client()
+            doc_ref = db.collection("documents").document(doc_id)
+            doc_ref.set({
+                "doc_id": doc_id,
+                "filename": filename,
+                "stored_path": stored_path,
+                "file_type": file_type,
+                "page_count": page_count,
+                "status": status,
+                "created_at": firestore.SERVER_TIMESTAMP,
+                "updated_at": firestore.SERVER_TIMESTAMP,
+                "owner_id": None
+            })
+        except Exception as e:
+            logger.error(f"[FIREBASE_WRITE_ERROR] Failed to write document metadata for {doc_id}: {e}", exc_info=True)
+            raise e
     else:
         from backend.database import get_db_connection
         with get_db_connection() as conn:
@@ -419,3 +423,40 @@ def get_chat_history(session_id: str) -> list[dict]:
                     "created_at": row["created_at"]
                 })
             return results
+
+def get_all_documents() -> list[dict]:
+    if settings.FIREBASE_ENABLED:
+        from backend.firebase.client import get_firestore_client
+        db = get_firestore_client()
+        docs = db.collection("documents").get()
+        results = []
+        for doc in docs:
+            data = doc.to_dict()
+            if "created_at" in data and data["created_at"]:
+                if hasattr(data["created_at"], "isoformat"):
+                    data["created_at"] = data["created_at"].isoformat()
+                else:
+                    data["created_at"] = str(data["created_at"])
+            results.append(data)
+        return results
+    else:
+        from backend.database import get_db_connection
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT doc_id, filename, stored_path, file_type, page_count, status, created_at FROM documents ORDER BY created_at DESC"
+            )
+            rows = cursor.fetchall()
+            results = []
+            for row in rows:
+                results.append({
+                    "doc_id": row["doc_id"],
+                    "filename": row["filename"],
+                    "stored_path": row["stored_path"],
+                    "file_type": row["file_type"],
+                    "page_count": row["page_count"],
+                    "status": row["status"],
+                    "created_at": row["created_at"]
+                })
+            return results
+
