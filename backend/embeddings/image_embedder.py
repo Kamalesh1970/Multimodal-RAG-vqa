@@ -57,6 +57,8 @@ class ImageEmbedder:
         """
         Returns the output dimension of the CLIP visual encoder.
         """
+        if settings.IMAGE_EMBEDDING_MODEL == "ViT-B-32":
+            return 512
         model, _, _, _ = cls.get_model_and_transforms()
         if hasattr(model, "visual") and hasattr(model.visual, "output_dim"):
             return model.visual.output_dim

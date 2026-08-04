@@ -33,6 +33,8 @@ class TextEmbedder:
         """
         Returns the embedding dimension of the text model.
         """
+        if "all-MiniLM-L6-v2" in settings.TEXT_EMBEDDING_MODEL:
+            return 384
         model = cls.get_model()
         if hasattr(model, "get_embedding_dimension"):
             return model.get_embedding_dimension()

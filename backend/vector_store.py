@@ -22,23 +22,43 @@ class VectorStore:
         return settings.VECTOR_INDEX_DIR / "image.index"
 
     @classmethod
-    def initialize(cls, text_dim: int, image_dim: int):
+    def initialize(cls, text_dim: int | None = None, image_dim: int | None = None):
         """
-        Initializes or loads FAISS indexes. Must be called with the expected dimensions.
+        Initializes FAISS indexes metadata. Defers loading of actual indexes to first use.
         """
-        cls._text_dim = text_dim
-        cls._image_dim = image_dim
+        if text_dim is not None:
+            cls._text_dim = text_dim
+        if image_dim is not None:
+            cls._image_dim = image_dim
         
         # Ensure target index directories exist
         settings.VECTOR_INDEX_DIR.mkdir(parents=True, exist_ok=True)
-        
-        cls.load_indices()
+
+    @classmethod
+    def _ensure_indices_loaded(cls):
+        """
+        Ensures FAISS indexes are loaded/created with valid dimensions before any read/write operations.
+        """
+        if cls._text_index is None or cls._image_index is None:
+            if cls._text_dim is None:
+                from backend.embeddings.text_embedder import TextEmbedder
+                cls._text_dim = TextEmbedder.get_dimension()
+            if cls._image_dim is None:
+                from backend.embeddings.image_embedder import ImageEmbedder
+                cls._image_dim = ImageEmbedder.get_dimension()
+            cls.load_indices()
 
     @classmethod
     def load_indices(cls):
         """
         Loads indexes from disk if they exist, otherwise creates fresh flat exact ID indexes.
         """
+        if cls._text_dim is None or cls._image_dim is None:
+            from backend.embeddings.text_embedder import TextEmbedder
+            from backend.embeddings.image_embedder import ImageEmbedder
+            cls._text_dim = cls._text_dim or TextEmbedder.get_dimension()
+            cls._image_dim = cls._image_dim or ImageEmbedder.get_dimension()
+
         text_path = cls.get_text_index_path()
         image_path = cls.get_image_index_path()
         
@@ -132,8 +152,7 @@ class VectorStore:
         """
         Validates and adds a text vector mapped to pages.id integer key in FAISS text index.
         """
-        if cls._text_index is None:
-            raise RuntimeError("Text index is not initialized. Call initialize() first.")
+        cls._ensure_indices_loaded()
             
         v = cls.validate_vector(vector, cls._text_dim)
         ids = np.array([page_id], dtype=np.int64)
@@ -151,8 +170,7 @@ class VectorStore:
         """
         Validates and adds an image vector mapped to pages.id integer key in FAISS image index.
         """
-        if cls._image_index is None:
-            raise RuntimeError("Image index is not initialized. Call initialize() first.")
+        cls._ensure_indices_loaded()
             
         v = cls.validate_vector(vector, cls._image_dim)
         ids = np.array([page_id], dtype=np.int64)
@@ -170,6 +188,7 @@ class VectorStore:
         """
         Checks if a given page_id integer key is present in FAISS text index.
         """
+        cls._ensure_indices_loaded()
         if cls._text_index is None:
             return False
         try:
@@ -190,6 +209,7 @@ class VectorStore:
         """
         Checks if a given page_id integer key is present in FAISS image index.
         """
+        cls._ensure_indices_loaded()
         if cls._image_index is None:
             return False
         try:
@@ -209,6 +229,7 @@ class VectorStore:
         """
         Removes a page_id mapping and its vector from FAISS text index.
         """
+        cls._ensure_indices_loaded()
         if cls._text_index is not None:
             ids_to_remove = np.array([page_id], dtype=np.int64)
             cls._text_index.remove_ids(ids_to_remove)
@@ -218,6 +239,7 @@ class VectorStore:
         """
         Removes a page_id mapping and its vector from FAISS image index.
         """
+        cls._ensure_indices_loaded()
         if cls._image_index is not None:
             ids_to_remove = np.array([page_id], dtype=np.int64)
             cls._image_index.remove_ids(ids_to_remove)
@@ -227,6 +249,7 @@ class VectorStore:
         """
         Returns index status metadata, vector counts, and dimensions.
         """
+        cls._ensure_indices_loaded()
         text_count = cls._text_index.ntotal if cls._text_index is not None else 0
         image_count = cls._image_index.ntotal if cls._image_index is not None else 0
         return {
@@ -242,6 +265,7 @@ class VectorStore:
         """
         Searches the FAISS text index. Returns a list of (page_id, score) tuples.
         """
+        cls._ensure_indices_loaded()
         if cls._text_index is None:
             logger.warning("Text index is not initialized.")
             return []
@@ -273,6 +297,7 @@ class VectorStore:
         """
         Searches the FAISS image index. Returns a list of (page_id, score) tuples.
         """
+        cls._ensure_indices_loaded()
         if cls._image_index is None:
             logger.warning("Image index is not initialized.")
             return []
@@ -305,6 +330,7 @@ class VectorStore:
         Checks SQLite database pages table against FAISS text and image index maps for sync consistency.
         Returns detailed report containing list of orphans (missing database pages, or missing index vectors).
         """
+        cls._ensure_indices_loaded()
         # Get all page IDs from repository
         from backend.storage import repository
         db_pages = repository.get_all_pages_sync_info()

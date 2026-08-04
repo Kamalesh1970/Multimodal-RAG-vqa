@@ -1,3 +1,5 @@
+import time
+start_import_time = time.time()
 # pyrefly: ignore [missing-import]
 import logging
 # Force config reload
@@ -24,46 +26,74 @@ logging.basicConfig(
 )
 logger = logging.getLogger("backend")
 
+async def load_models_background():
+    """
+    Background worker that pre-loads text/image embedders after startup.
+    Uses run_in_threadpool to keep the event loop unblocked.
+    """
+    logger.info("Starting background loading of AI models...")
+    try:
+        from backend.embeddings.text_embedder import TextEmbedder
+        from fastapi.concurrency import run_in_threadpool
+        await run_in_threadpool(TextEmbedder.get_model)
+        logger.info("Background text embedder loaded successfully.")
+    except Exception as e:
+        logger.error(f"Error during background text embedder loading: {e}", exc_info=True)
+        
+    try:
+        from backend.embeddings.image_embedder import ImageEmbedder
+        from fastapi.concurrency import run_in_threadpool
+        await run_in_threadpool(ImageEmbedder.get_model_and_transforms)
+        logger.info("Background image embedder loaded successfully.")
+    except Exception as e:
+        logger.error(f"Error during background image embedder loading: {e}", exc_info=True)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup Initialization
+    import asyncio
+    start_time = time.time()
     logger.info("Initializing Multimodal RAG VQA backend application...")
     
     # 1. Initialize and verify required directories
-    logger.info("Verifying and creating storage directories...")
+    t_start = time.time()
     try:
         settings.UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
         settings.PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
         settings.INDEXES_DIR.mkdir(parents=True, exist_ok=True)
-        logger.info("Storage directories verified.")
+        folders_time = time.time() - t_start
+        logger.info(f"Storage directories verified: {folders_time:.4f}s")
     except Exception as e:
         logger.critical(f"Directory initialization failed: {e}", exc_info=True)
         raise e
 
     # 2. Initialize Storage Backend (SQLite or Firestore)
+    t_start = time.time()
     try:
         repository.init_storage()
+        db_time = time.time() - t_start
+        db_provider = repository.get_db_provider()
+        logger.info(f"Database ({db_provider}) initialized: {db_time:.4f}s")
     except Exception as e:
         logger.critical(f"Storage initialization failed: {e}", exc_info=True)
         raise e
 
-        
-    # 3. Initialize FAISS Vector Store
+    # 3. Initialize FAISS Vector Store Metadata only
+    t_start = time.time()
     try:
-        from backend.embeddings.text_embedder import TextEmbedder
-        from backend.embeddings.image_embedder import ImageEmbedder
         from backend.vector_store import VectorStore
-        
-        text_dim = TextEmbedder.get_dimension()
-        image_dim = ImageEmbedder.get_dimension()
-        
-        VectorStore.initialize(text_dim=text_dim, image_dim=image_dim)
-        logger.info("Vector store initialized successfully.")
+        VectorStore.initialize()
+        faiss_time = time.time() - t_start
+        logger.info(f"FAISS metadata initialized: {faiss_time:.4f}s")
     except Exception as e:
         logger.critical(f"Vector store initialization failed: {e}", exc_info=True)
         raise e
         
-    logger.info("Application startup completed successfully.")
+    total_time = time.time() - start_time
+    logger.info(f"Application ready: {total_time:.4f}s")
+    
+    # Trigger background model pre-loading
+    asyncio.create_task(load_models_background())
+    
     yield
     
     # Shutdown
@@ -557,5 +587,8 @@ def get_session_history(session_id: str, current_user: dict = Depends(get_curren
     except Exception as e:
         logger.error(f"Error retrieving chat history for session {session_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to retrieve chat history.")
+
+routes_registered_time = time.time() - start_import_time
+logger.info(f"API routes registered: {routes_registered_time:.4f}s")
 
 
