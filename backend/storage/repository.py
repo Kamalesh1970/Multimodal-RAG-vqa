@@ -63,6 +63,7 @@ def create_document(doc_id: str, filename: str, stored_path: str, file_type: str
     if settings.FIREBASE_ENABLED:
         from backend.firebase.client import get_firestore_client
         from google.cloud import firestore
+<<<<<<< HEAD
         db = get_firestore_client()
         doc_ref = db.collection("documents").document(doc_id)
         doc_ref.set({
@@ -76,6 +77,25 @@ def create_document(doc_id: str, filename: str, stored_path: str, file_type: str
             "updated_at": firestore.SERVER_TIMESTAMP,
             "owner_id": owner_id
         })
+=======
+        try:
+            db = get_firestore_client()
+            doc_ref = db.collection("documents").document(doc_id)
+            doc_ref.set({
+                "doc_id": doc_id,
+                "filename": filename,
+                "stored_path": stored_path,
+                "file_type": file_type,
+                "page_count": page_count,
+                "status": status,
+                "created_at": firestore.SERVER_TIMESTAMP,
+                "updated_at": firestore.SERVER_TIMESTAMP,
+                "owner_id": None
+            })
+        except Exception as e:
+            logger.error(f"[FIREBASE_WRITE_ERROR] Failed to write document metadata for {doc_id}: {e}", exc_info=True)
+            raise e
+>>>>>>> phase9-fixes
     else:
         from backend.database import get_db_connection
         with get_db_connection() as conn:
@@ -444,6 +464,7 @@ def get_chat_history(session_id: str) -> list[dict]:
                 })
             return results
 
+<<<<<<< HEAD
 def get_documents(owner_id: str) -> list[dict]:
     """
     Retrieves all documents owned by the specified owner_id.
@@ -456,6 +477,13 @@ def get_documents(owner_id: str) -> list[dict]:
             docs = db.collection("documents").get()
         else:
             docs = db.collection("documents").where("owner_id", "==", owner_id).get()
+=======
+def get_all_documents() -> list[dict]:
+    if settings.FIREBASE_ENABLED:
+        from backend.firebase.client import get_firestore_client
+        db = get_firestore_client()
+        docs = db.collection("documents").get()
+>>>>>>> phase9-fixes
         results = []
         for doc in docs:
             data = doc.to_dict()
@@ -470,6 +498,7 @@ def get_documents(owner_id: str) -> list[dict]:
         from backend.database import get_db_connection
         with get_db_connection() as conn:
             cursor = conn.cursor()
+<<<<<<< HEAD
             if owner_id == "test_default_user":
                 cursor.execute(
                     "SELECT doc_id, filename, stored_path, file_type, page_count, status, created_at, owner_id FROM documents"
@@ -578,3 +607,22 @@ def create_or_update_user_profile(uid: str, email: str | None, display_name: str
                 """,
                 (uid, email, display_name)
             )
+=======
+            cursor.execute(
+                "SELECT doc_id, filename, stored_path, file_type, page_count, status, created_at FROM documents ORDER BY created_at DESC"
+            )
+            rows = cursor.fetchall()
+            results = []
+            for row in rows:
+                results.append({
+                    "doc_id": row["doc_id"],
+                    "filename": row["filename"],
+                    "stored_path": row["stored_path"],
+                    "file_type": row["file_type"],
+                    "page_count": row["page_count"],
+                    "status": row["status"],
+                    "created_at": row["created_at"]
+                })
+            return results
+
+>>>>>>> phase9-fixes

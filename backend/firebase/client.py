@@ -60,12 +60,30 @@ def get_firestore_client():
 
 def is_firebase_available() -> bool:
     """
-    Checks if Firebase integration is enabled and successfully connected/available.
+    Checks if Firebase integration is enabled and successfully connected/available
+    by performing a real network fetch operation to confirm database existence and permissions.
     """
     if not settings.FIREBASE_ENABLED:
         return False
     try:
         client = get_firestore_client()
-        return client is not None
-    except Exception:
+        if client is None:
+            logger.error("[FIREBASE_ERROR] Firestore client could not be obtained.")
+            return False
+            
+        # Attempt a real read operation to check network/credentials/project permissions
+        client.collection("system").document("connection_test").get(timeout=5.0)
+        return True
+    except Exception as e:
+        logger.error("\n======================================================================")
+        logger.error("FIREBASE/FIRESTORE CONNECTION ERROR DETECTED")
+        logger.error("======================================================================")
+        logger.error(f"Error details: {e}")
+        logger.error("\nDiagnostic Checklist:")
+        logger.error("1. Have you created the Firestore Database in your Firebase Console?")
+        logger.error("   Go to Console -> Firestore Database -> Click 'Create database'.")
+        logger.error("2. Is your Firestore database in Native Mode (required) instead of Datastore Mode?")
+        logger.error("3. Are the credentials in 'secrets/firebase-service-account.json' valid and linked to project ID 'multimodal-rag-vqa'?")
+        logger.error("4. Check your server internet connection/firewall permissions.")
+        logger.error("======================================================================\n", exc_info=True)
         return False

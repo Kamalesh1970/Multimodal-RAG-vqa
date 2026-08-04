@@ -250,7 +250,8 @@ def retrieve_evidence(doc_id: str, question: str, top_k: int | None = None) -> l
             "page_number": p_info["page_number"],
             "scores": scores_dict,
             "matched_modalities": matched_modalities,
-            "evidence_text": evidence_text
+            "evidence_text": evidence_text,
+            "ocr_text": p_info["ocr_text"]
         })
         
     # Filter candidates by minimum score

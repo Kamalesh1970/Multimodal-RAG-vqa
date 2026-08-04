@@ -232,12 +232,14 @@ def generate_grounded_answer(doc_id: str, question: str, top_k: int | None = Non
         
         for result in retrieval_results:
             page_num = result["page_number"]
-            evidence_text = "\n".join(result["evidence_text"])
+            ocr_text = result.get("ocr_text")
+            if ocr_text is None:
+                ocr_text = "\n".join(result["evidence_text"])
             
             page_context = (
                 f"--- CONTEXT PAGE {page_num} ---\n"
                 f"Page Number: {page_num}\n"
-                f"OCR Extracted Text:\n{evidence_text}\n\n"
+                f"OCR Extracted Text:\n{ocr_text}\n\n"
             )
             
             # Stop loading context if it exceeds character limits
@@ -302,12 +304,14 @@ def generate_grounded_answer(doc_id: str, question: str, top_k: int | None = Non
         
         for result in retrieval_results:
             page_num = result["page_number"]
-            evidence_text = "\n".join(result["evidence_text"])
+            ocr_text = result.get("ocr_text")
+            if ocr_text is None:
+                ocr_text = "\n".join(result["evidence_text"])
             
             page_context = (
                 f"--- CONTEXT PAGE {page_num} ---\n"
                 f"Page Number: {page_num}\n"
-                f"OCR Extracted Text:\n{evidence_text}\n\n"
+                f"OCR Extracted Text:\n{ocr_text}\n\n"
             )
             
             # Budget check
